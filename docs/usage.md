@@ -4,8 +4,11 @@
   vertical move, within 0.6s)
 - Tap: click on a browser or screen card. Vertical drag: scroll it
 - Tap the title: reload the card list
-- `+`: new terminal, new browser (asks for a URL). `×`: close the current card
-  (asks first)
+- `+`: new terminal, new shell, new browser (asks for a URL). `×`: close the
+  current card (asks first)
+- Shell cards run a shell inside swiv itself, with no window on the desktop.
+  Their input also works while the desktop is locked; the shell keeps running
+  while the phone is away and ends when the card is closed
 - Input box: sends text + Enter. Key buttons: Esc, Tab, Shift+Tab, arrows, ^C,
   Backspace, Enter
 - File card: tap a folder to enter it. ↑ goes back to the list while viewing a

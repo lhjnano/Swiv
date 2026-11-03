@@ -15,6 +15,10 @@ DEFAULTS = {
     "cdp_ports": [9222],
     "chrome_bin": "",
     "chrome_profile": os.path.join(_XDG, "swiv", "chrome"),
+    "shell": "",  # program of the shell cards; empty = $SHELL, then bash
+    # set both to serve HTTPS (see docs/https.md); empty keeps plain HTTP
+    "cert": "",
+    "key": "",
     "idle_restore_sec": 20,
     "session_days": 7,
     # "pam": this account's system password, "password": --set-password (Windows has no PAM)

@@ -66,6 +66,7 @@ xdotool, wmctrl, xprop, xclip, ffmpeg, fontconfig (fc-match), gnome-terminal
 - [Network access](docs/network.md): firewall, address, VPN
 - [Client setup](docs/client.md): Android, iPhone and iPad, desktop browsers
 - [Commands and configuration](docs/configuration.md)
+- [HTTPS and the installable app](docs/https.md)
 - [Usage](docs/usage.md): gestures and buttons
 - [Security](docs/security.md): login, throttling, sandbox, network
 - [Troubleshooting](docs/troubleshooting.md), uninstall

@@ -448,6 +448,8 @@ def page_close(cid):
 # shared -------------------------------------------------------------------------
 
 def leave(cid):
+    if cid.startswith("sh"):
+        return  # shell cards outlive the phone on purpose
     with LOCK:
         if cid.startswith("t"):
             _term_restore(cid[1:].split(".")[0])

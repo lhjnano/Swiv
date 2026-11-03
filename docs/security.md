@@ -25,9 +25,10 @@
   connections from outside the listed countries before the login page, using the
   public RIR range data refreshed weekly. It cuts foreign scanners, but cannot
   stop someone renting an address inside an allowed country.
-- Traffic is **plain HTTP**. Anyone on the same network can sniff the login
-  password, so use it on a trusted network or inside a VPN (Tailscale and the
-  like), and otherwise narrow `bind` to the VPN address.
+- Traffic is **plain HTTP** by default: anyone on the same network can sniff
+  the login password, so use it on a trusted network or inside a VPN, and
+  narrow `bind` to the VPN address. Setting `cert` and `key`
+  ([https.md](https.md)) turns on HTTPS and fixes this.
 - The browser cards' debugging port (9222) only listens locally, but any program
   on this machine can drive that Chrome. That is why "new browser" uses a
   dedicated profile separate from your everyday one.

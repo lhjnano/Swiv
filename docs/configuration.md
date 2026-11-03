@@ -32,6 +32,8 @@ full list is in `config.example.json`. Run `make restart` after changing it.
   google-chrome, then chromium)
 - `chrome_profile` (default `~/.config/swiv/chrome`): dedicated profile for
   that browser
+- `cert`, `key` (default `""`): set both to serve HTTPS;
+  see [https.md](https.md)
 - `idle_restore_sec` (default `20`): seconds without a phone poll before window
   sizes are restored
 - `session_days` (default `7`): how long a login stays valid

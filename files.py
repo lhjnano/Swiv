@@ -7,16 +7,18 @@ import os
 
 import markdown
 
-SANDBOX = "sandbox allow-scripts allow-popups allow-forms"
+SANDBOX = "sandbox allow-scripts allow-popups allow-forms allow-downloads"
 MD_EXT = ["extra", "sane_lists", "toc", "codehilite"]
-MD_CSS = """body{margin:0 auto;max-width:860px;padding:14px 16px 40px;font:15px/1.6 system-ui,
-sans-serif;color:#1f2328;background:#fff;word-wrap:break-word}
-pre{overflow-x:auto;background:#f6f8fa;padding:10px;border-radius:6px;font-size:13px}
-code{font:13px ui-monospace,monospace;background:#f6f8fa;padding:1px 4px;border-radius:4px}
+MD_CSS = """body{margin:0 auto;max-width:860px;padding:16px 18px 48px;font:15px/1.65
+system-ui,-apple-system,'Segoe UI',Roboto,'Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+color:#20262a;background:#fff;word-wrap:break-word}
+pre{overflow-x:auto;background:#f3f6f4;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.5}
+code{font:13px ui-monospace,'SF Mono','Cascadia Mono','Droid Sans Mono',monospace;
+background:#f3f6f4;padding:1px 5px;border-radius:4px}
 pre code{padding:0;background:none}table{border-collapse:collapse;display:block;overflow-x:auto}
-th,td{border:1px solid #d0d7de;padding:5px 9px}img{max-width:100%}
-blockquote{margin:0;padding:0 12px;color:#59636e;border-left:4px solid #d0d7de}
-h1,h2{border-bottom:1px solid #d8dee4;padding-bottom:4px}a{color:#0969da}"""
+th,td{border:1px solid #d5dbd8;padding:5px 9px}img{max-width:100%}
+blockquote{margin:0;padding:0 12px;color:#5c6660;border-left:3px solid #3fb26f}
+h1,h2{border-bottom:1px solid #e3e8e5;padding-bottom:4px}a{color:#157a4b}"""
 
 
 def root_of(cfg):
@@ -67,6 +69,9 @@ def serve(handler, root, rel, raw):
                 f"initial-scale=1'><title>{title}</title><style>{MD_CSS}</style>{body}")
         handler._send(200, "text/html; charset=utf-8", page.encode(), headers)
         return True
+    if p.lower().endswith((".pem", ".crt", ".cer", ".p12", ".pfx", ".der")):
+        # certificates install from the downloads folder, not from a viewer
+        headers.append(("Content-Disposition", "attachment; filename=" + os.path.basename(p)))
     ctype = mimetypes.guess_type(p)[0] or ""
     if not ctype.startswith(("image/", "text/html", "application/pdf", "video/", "audio/")):
         ctype = "text/plain; charset=utf-8" if _looks_text(p) else "application/octet-stream"

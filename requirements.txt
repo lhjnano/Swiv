@@ -1,4 +1,5 @@
 websocket-client>=1.0
+pyte>=0.8.0
 Markdown>=3.3
 Pygments>=2.10
 python-pam>=2.0; sys_platform != "win32"

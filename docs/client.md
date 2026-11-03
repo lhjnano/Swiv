@@ -13,7 +13,10 @@ that runs the server.
 
 1. Join the same network (Wi-Fi or VPN) as the server.
 2. Open the address in Chrome and log in.
-3. Optional: menu ⋮ → "Add to Home screen" for an app-like shortcut.
+3. Over HTTPS an `install` button appears in the header; the installed app
+opens without a browser bar and shows a connect notice when the desktop
+is unreachable. Over HTTP use the browser menu's "Add to Home screen"
+instead (a plain shortcut).
 
 Chrome may label the page "Not secure" because it is plain HTTP. That is
 expected on a trusted network or VPN.

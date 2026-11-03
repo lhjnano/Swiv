@@ -23,6 +23,7 @@ import config
 import files
 import geo
 import screen
+import shell
 import theme
 
 # request limits and clamps for phone-supplied values
@@ -31,13 +32,14 @@ MAX_INPUT = 2000         # characters typed into a terminal per request
 LOGIN_FAIL_DELAY = 1     # seconds held after a wrong password
 TERM_COLS, TERM_ROWS = (20, 300), (5, 200)
 PAGE_W, PAGE_H, PAGE_DPR = (200, 2000), (200, 3000), (1, 3)
+ICON_CACHE = "private, max-age=86400"
 WALLPAPER_CACHE, FONT_CACHE = "private, max-age=3600", "private, max-age=86400"
 PAGE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")
 SESSIONS = {}  # token -> expiry epoch; in memory, so a restart logs everyone out
 FTOKENS = {}  # file token -> expiry; sandboxed documents cannot send the cookie
 SESSION_FTOK = {}  # session token -> its file token
 # \Z, not $: $ would also accept a trailing newline
-CARD_RE = re.compile(r"^(t0x[0-9a-fA-F]+\.\d+|t\d+\.\d+|p\d+\.[A-Fa-f0-9]{16,64}|s\d{1,2})\Z")
+CARD_RE = re.compile(r"^(t0x[0-9a-fA-F]+\.\d+|t\d+\.\d+|p\d+\.[A-Fa-f0-9]{16,64}|s\d{1,2}|sh\d{1,4})\Z")
 
 
 def _clamp(v, lo_hi):
@@ -77,16 +79,49 @@ def check_login(cfg, pw):
 
 
 LOGIN = """<!doctype html><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>swiv</title>
-<style>body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#111;
-font:16px system-ui,sans-serif;color:#eee}form{display:grid;gap:12px;width:min(320px,90vw)}
-input,button{font:inherit;padding:12px;border-radius:8px;border:1px solid #444}
-input{background:#222;color:#eee}button{background:#3b6;color:#fff;border:0}
-p{color:#f77;margin:0}</style>
-<form method=post action=/login><label for=pw>%s</label>
-<input id=pw name=pw type=password autocomplete=current-password autofocus required>
-%s<button>login</button></form>"""
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name=theme-color content=#0b0e0d>
+<title>Swiv</title>
+<style>
+:root{--fg:#e8ebe9;--dim:#93a09a;--acc:#3fb26f;--ink:#07120c;--danger:#e2695f;
+--line:rgba(255,255,255,.14);--mono:ui-monospace,"SF Mono","Cascadia Mono",monospace}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#0b0e0d;
+color:var(--fg);font:15px/1.5 system-ui,"Noto Sans KR",sans-serif;
+padding:max(24px,env(safe-area-inset-top)) 24px max(24px,env(safe-area-inset-bottom))}
+main{width:min(320px,100vw);display:grid;gap:26px}
+.mark{font:700 26px var(--mono);color:var(--acc);letter-spacing:1px}
+h1{margin:4px 0 0;font-size:21px;font-weight:600;letter-spacing:.4px}
+.who{color:var(--dim);font:13px var(--mono)}
+input::placeholder{color:var(--dim)}
+input{width:100%%;height:48px;padding:0 14px;border:1px solid var(--line);border-radius:10px;
+background:rgba(255,255,255,.04);color:var(--fg);font:15px var(--mono)}
+input:focus{outline:2px solid var(--acc);border-color:transparent}
+form{display:grid;gap:14px}
+form p{margin:0;color:var(--danger);font-size:13px}
+button{height:48px;border:0;border-radius:10px;background:var(--acc);color:var(--ink);
+font:600 15px system-ui,"Noto Sans KR",sans-serif}
+button:active{transform:translateY(1px)}
+a.ca{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;
+border:1px solid var(--line);border-radius:10px;color:var(--dim);
+text-decoration:none;font-size:13px}
+a.ca:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+</style>
+<main>
+<div><div class=mark>&gt;_</div><h1>Swiv</h1></div>
+<form method=post action=/login>
+<div class=who>%s</div>
+<input id=pw name=pw type=password placeholder=password aria-label=password
+autocomplete=current-password autofocus required>
+%s<button>log in</button>
+</form>
+<a class=ca id=ca href=/ca><svg width=15 height=15 viewBox="0 0 24 24" fill=none
+stroke=currentColor stroke-width=2><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>
+<path d="M9 12l2 2 4-4"/></svg>install root certificate</a>
+</main>
+<script>var c=document.getElementById('ca');
+if(localStorage.getItem('swiv.ca'))c.style.display='none';
+else c.onclick=function(){localStorage.setItem('swiv.ca','1')}</script>"""
 
 
 LIMITER = auth.Limiter()  # main() rebuilds it from the config
@@ -114,7 +149,7 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _who(self):
-        return html.escape(f"swiv: {login_user()}" if self.cfg["auth"] == "pam" else "swiv")
+        return html.escape(login_user() if self.cfg["auth"] == "pam" else "swiv")
 
     def _login_page(self, code, msg):
         err = f"<p>{html.escape(msg)}</p>" if msg else ""
@@ -200,6 +235,9 @@ class H(BaseHTTPRequestHandler):
                 if not cards.term_new():
                     return self._send(503, "text/plain", b"terminal cards need gnome-terminal and AT-SPI")
                 return self._json({"ok": True})
+            if body.get("kind") == "shell":
+                shell.spawn(str(self.cfg.get("shell") or ""))
+                return self._json({"ok": True})
             url = str(body.get("url") or "about:blank").strip()
             if "://" not in url and url != "about:blank":
                 url = "https://" + url
@@ -215,7 +253,10 @@ class H(BaseHTTPRequestHandler):
             return
         try:
             if path == "/open":
-                if cid.startswith("s"):
+                if cid.startswith("sh"):
+                    ok = shell.open_(cid, _clamp(int(body["cols"]), TERM_COLS),
+                                     _clamp(int(body["rows"]), TERM_ROWS))
+                elif cid.startswith("s"):
                     ok = screen.open_(cid, round(_clamp(int(body["width"]), PAGE_W) *
                                                  _clamp(float(body.get("dpr", 1)), PAGE_DPR)))
                 elif cid.startswith("t"):
@@ -230,12 +271,18 @@ class H(BaseHTTPRequestHandler):
                 cards.leave(cid)
                 return self._json({"ok": True})
             if path == "/close":
+                if cid.startswith("sh"):
+                    shell.close(cid)
+                    return self._json({"ok": True})
                 if cid.startswith("s"):
                     return self._send(400, "text/plain", b"a screen cannot be closed")
                 ok = cards.term_close(cid) if cid.startswith("t") else cards.page_close(cid)
                 return self._json({"ok": ok}, 200 if ok else 404)
             if path == "/input":
-                if cid.startswith("s"):
+                if cid.startswith("sh"):
+                    ok = shell.write(cid, str(body.get("text", ""))[:MAX_INPUT]
+                                     + shell.KEYS.get(str(body.get("key", "")), ""))
+                elif cid.startswith("s"):
                     ok = screen.input_(cid, body)
                 elif cid.startswith("t"):
                     ok = cards.term_input(cid, str(body.get("text", ""))[:MAX_INPUT], str(body.get("key", "")))
@@ -250,6 +297,28 @@ class H(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if not self._geo_ok():
             return self._send(403, "text/plain", b"blocked country")
+        if path == "/ca":  # public: needed before the phone trusts the certificate
+            ca = _root_ca(self.cfg)
+            if ca:
+                with open(ca, "rb") as f:
+                    return self._send(200, "application/x-pem-file", f.read(),
+                                      [("Content-Disposition", "attachment; filename=rootCA.crt")])
+            return self._send(404, "text/plain", b"no local certificate authority found")
+        if path in ("/sw.js", "/manifest", "/icon-192.png", "/icon-512.png"):
+            # public: the browser reads the app identity before any login, and a
+            # 401 here silently drops swiv from install candidates
+            if path == "/sw.js":
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sw.js"), "rb") as f:
+                    return self._send(200, "text/javascript", f.read())
+            if path == "/manifest":
+                return self._json({"name": "Swiv", "short_name": "Swiv", "start_url": "/",
+                                   "display": "standalone", "background_color": "#141414",
+                                   "theme_color": "#141414",
+                                   "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                                             {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}]})
+            icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", path[1:])
+            with open(icon, "rb") as f:
+                return self._send(200, "image/png", f.read(), cache=ICON_CACHE)
         if path == "/login":
             wait = LIMITER.blocked(self.client_address[0])
             return self._locked(wait) if wait else self._login_page(200, "")
@@ -270,7 +339,8 @@ class H(BaseHTTPRequestHandler):
             with open(PAGE_FILE, "rb") as f:
                 return self._send(200, "text/html", f.read())
         if path == "/cards":
-            return self._json([{"kind": "files", "id": "files", "title": "files"}] + cards.list_cards(self.cfg))
+            return self._json([{"kind": "files", "id": "files", "title": "files"}]
+                               + shell.cards() + cards.list_cards(self.cfg))
         if path == "/theme":
             return self._json(theme.summary())
         if path == "/wallpaper":
@@ -294,11 +364,11 @@ class H(BaseHTTPRequestHandler):
         if cid is None:
             return
         if path == "/term":
-            segs = cards.term_text(cid)
+            segs = shell.screen(cid) if cid.startswith("sh") else cards.term_text(cid)
             return self._send(404, "text/plain", b"gone") if segs is None else self._json(segs)
         if path == "/shot":
             try:
-                jpg = screen.shot(cid) if cid.startswith("s") else cards.page_shot(cid)
+                jpg = screen.shot(cid) if cid.startswith("s") and not cid.startswith("sh") else cards.page_shot(cid)
             except (OSError, ValueError, websocket_errors()) as e:
                 return self._send(502, "text/plain", str(e).encode())
             return self._send(404, "text/plain", b"not open") if jpg is None else \
@@ -308,6 +378,29 @@ class H(BaseHTTPRequestHandler):
 
 def websocket_errors():
     return cards.websocket.WebSocketException
+
+
+def _root_ca(cfg):
+    """The mkcert root that likely signed the configured certificate, if any."""
+    for base in (os.environ.get("CAROOT"), "~/.local/share/mkcert",
+                 "~/Library/Application Support/mkcert", "%LOCALAPPDATA%/mkcert"):
+        if not base:
+            continue
+        p = os.path.join(os.path.expandvars(os.path.expanduser(base)), "rootCA.pem")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+class TlsServer(ThreadingHTTPServer):
+    """Handshake TLS in the worker thread: browsers park preconnected sockets
+    without a ClientHello, which would stall the accept loop otherwise."""
+    ctx = None
+
+    def finish_request(self, request, client_address):
+        if self.ctx:
+            request = self.ctx.wrap_socket(request, server_side=True)
+        self.RequestHandlerClass(request, client_address, self)
 
 
 def main():
@@ -347,8 +440,15 @@ def main():
             print(f"warning: PAM service {H.cfg['pam_service']!r} uses {', '.join(mods)}; keep "
                   "login_global_max_failures below its deny count or the account can lock", flush=True)
     threading.Thread(target=cards.reaper, daemon=True).start()
-    srv = ThreadingHTTPServer((H.cfg["bind"], int(H.cfg["port"])), H)
-    print(f"swiv listening on {H.cfg['bind']}:{H.cfg['port']} (config {config.PATH})", flush=True)
+    srv = TlsServer((H.cfg["bind"], int(H.cfg["port"])), H)
+    scheme = "http"
+    if H.cfg.get("cert") and H.cfg.get("key"):
+        import ssl
+        srv.ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        srv.ctx.load_cert_chain(H.cfg["cert"], H.cfg["key"])
+        scheme = "https"
+        log(f"https enabled with cert {H.cfg['cert']}")
+    print(f"swiv listening on {scheme}://{H.cfg['bind']}:{H.cfg['port']} (config {config.PATH})", flush=True)
     srv.serve_forever()
 
 

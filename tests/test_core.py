@@ -168,11 +168,11 @@ class WindowMatch(unittest.TestCase):
 
 class CardIds(unittest.TestCase):
     def test_accept(self):
-        for cid in ("t58720266.0", "t0x3800027f.2", "p9222." + "A" * 32, "s1"):
+        for cid in ("t58720266.0", "t0x3800027f.2", "p9222." + "A" * 32, "s1", "sh0", "sh12"):
             self.assertTrue(server.CARD_RE.match(cid), cid)
 
     def test_reject(self):
-        for cid in ("t1;rm -rf", "p9222./etc", "x1.0", "t1.0\n", "p9222.zz", "s123", "s1\n"):
+        for cid in ("t1;rm -rf", "p9222./etc", "x1.0", "t1.0\n", "p9222.zz", "s123", "s1\n", "sh", "sh12345"):
             self.assertIsNone(server.CARD_RE.match(cid), cid)
 
 
@@ -266,6 +266,65 @@ class Http(unittest.TestCase):
     def setUp(self):
         server.LIMITER = auth.Limiter(per_ip=3, global_max=10)
 
+    def test_shell_card_lifecycle(self):
+        import time
+        server.H.cfg["shell"] = "sh"
+        ck = self.cookie()
+        try:
+            st, _, _ = self.req("POST", "/new", json.dumps({"kind": "shell"}), cookie=ck)
+            self.assertEqual(st, 200)
+            st, _, b = self.req("GET", "/cards", cookie=ck)
+            sid = next(c["id"] for c in json.loads(b) if c["kind"] == "shell")
+            st, _, _ = self.req("POST", "/open",
+                                json.dumps({"id": sid, "cols": 80, "rows": 24}), cookie=ck)
+            self.assertEqual(st, 200)
+            self.req("POST", "/input",
+                     json.dumps({"id": sid, "text": "echo shellmark-$((6*7))", "key": "Enter"}), cookie=ck)
+            text = ""
+            for _ in range(25):
+                time.sleep(0.2)
+                st, _, b = self.req("GET", "/term?id=" + sid, cookie=ck)
+                if st == 200:
+                    text = b.decode()
+                    if "shellmark-42" in text:
+                        break
+            self.assertIn("shellmark-42", text)
+            st, _, _ = self.req("POST", "/close", json.dumps({"id": sid}), cookie=ck)
+            self.assertEqual(st, 200)
+            self.assertEqual(self.req("GET", "/term?id=" + sid, cookie=ck)[0], 404)
+        finally:
+            server.H.cfg.pop("shell", None)
+
+    def test_ca_download(self):
+        import server as sv
+        st, h, b = self.req("GET", "/login")
+        self.assertIn(b"install root certificate", b)     # the button is always there
+        old = sv._root_ca
+        try:
+            sv._root_ca = lambda cfg: os.path.join(self.root, "note.md")
+            st, h, b = self.req("GET", "/ca")             # public, no cookie
+            self.assertEqual(st, 200)
+            self.assertIn("attachment", h.get("Content-Disposition", ""))
+            sv._root_ca = lambda cfg: None
+            self.assertEqual(self.req("GET", "/ca")[0], 404)
+        finally:
+            sv._root_ca = old
+
+    def test_app_files(self):
+        self.assertEqual(self.req("GET", "/manifest")[0], 200)  # public, no cookie
+
+        ck = self.cookie()
+        for p, ctype in (("/manifest", "application/json"), ("/icon-192.png", "image/png"),
+                         ("/icon-512.png", "image/png"), ("/sw.js", "text/javascript")):
+            st, h, b = self.req("GET", p, cookie=ck)
+            self.assertEqual(st, 200, p)
+            self.assertTrue(h.get("Content-Type", "").startswith(ctype), p)
+        st, h, b = self.req("GET", "/manifest", cookie=ck)
+        m = json.loads(b)
+        self.assertEqual(m["name"], "Swiv")
+        self.assertEqual(len(m["icons"]), 2)
+        self.assertIn("cert", config.DEFAULTS)
+
     def test_audit_log_lines(self):
         import contextlib, io
         out = io.StringIO()
@@ -337,6 +396,11 @@ class Http(unittest.TestCase):
         self.assertIn(b"<h1", body)
         self.assertEqual(self.req("GET", "/f/badtoken/note.md")[0], 401)
         self.assertEqual(self.req("GET", f"/f/{data['ftok']}/%2e%2e/%2e%2e/etc/passwd")[0], 404)
+        write(os.path.join(self.root, "ca.pem"), "-----BEGIN CERTIFICATE-----")
+        st, h, b = self.req("GET", f"/f/{data['ftok']}/ca.pem")
+        self.assertEqual(st, 200)
+        self.assertIn("attachment", h.get("Content-Disposition", ""))
+        self.assertIn("allow-downloads", h["Content-Security-Policy"])
         self.assertEqual(self.req("GET", "/files?path=../..", cookie=cookie)[0], 404)
 
     def test_bad_card_id(self):
