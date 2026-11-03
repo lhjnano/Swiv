@@ -25,6 +25,17 @@ def write(path, text):
         f.write(text)
 
 
+class Version(unittest.TestCase):
+    def test_cli_version(self):
+        import subprocess
+        import sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run([sys.executable, "server.py", "--version"],
+                           capture_output=True, text=True, cwd=root)
+        self.assertIn("swiv 0.1.0", r.stdout)
+        self.assertEqual(r.returncode, 0)
+
+
 class Config(unittest.TestCase):
     def test_defaults_merge_with_file(self):
         write(config.PATH, json.dumps({"port": 7000, "files_root": "/srv"}))

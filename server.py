@@ -34,6 +34,8 @@ TERM_COLS, TERM_ROWS = (20, 300), (5, 200)
 PAGE_W, PAGE_H, PAGE_DPR = (200, 2000), (200, 3000), (1, 3)
 ICON_CACHE = "private, max-age=86400"
 WALLPAPER_CACHE, FONT_CACHE = "private, max-age=3600", "private, max-age=86400"
+VERSION = "0.1.0"
+
 PAGE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")
 SESSIONS = {}  # token -> expiry epoch; in memory, so a restart logs everyone out
 FTOKENS = {}  # file token -> expiry; sandboxed documents cannot send the cookie
@@ -404,6 +406,9 @@ class TlsServer(ThreadingHTTPServer):
 
 
 def main():
+    if "--version" in sys.argv:
+        print(f"swiv {VERSION}")
+        return
     if "--set-password" in sys.argv:
         set_password()
         return
@@ -448,7 +453,7 @@ def main():
         srv.ctx.load_cert_chain(H.cfg["cert"], H.cfg["key"])
         scheme = "https"
         log(f"https enabled with cert {H.cfg['cert']}")
-    print(f"swiv listening on {scheme}://{H.cfg['bind']}:{H.cfg['port']} (config {config.PATH})", flush=True)
+    print(f"swiv {VERSION} listening on {scheme}://{H.cfg['bind']}:{H.cfg['port']} (config {config.PATH})", flush=True)
     srv.serve_forever()
 
 
