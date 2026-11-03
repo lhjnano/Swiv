@@ -17,6 +17,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import apps
 import auth
 import cards
 import config
@@ -41,7 +42,7 @@ SESSIONS = {}  # token -> expiry epoch; in memory, so a restart logs everyone ou
 FTOKENS = {}  # file token -> expiry; sandboxed documents cannot send the cookie
 SESSION_FTOK = {}  # session token -> its file token
 # \Z, not $: $ would also accept a trailing newline
-CARD_RE = re.compile(r"^(t0x[0-9a-fA-F]+\.\d+|t\d+\.\d+|p\d+\.[A-Fa-f0-9]{16,64}|s\d{1,2}|sh\d{1,4})\Z")
+CARD_RE = re.compile(r"^(t0x[0-9a-fA-F]+\.\d+|t\d+\.\d+|p\d+\.[A-Fa-f0-9]{16,64}|s\d{1,2}|sh\d{1,4}|a\d{1,10}|desk)\Z")
 
 
 def _clamp(v, lo_hi):
@@ -255,7 +256,9 @@ class H(BaseHTTPRequestHandler):
             return
         try:
             if path == "/open":
-                if cid.startswith("sh"):
+                if cid == "desk" or cid.startswith("a"):
+                    ok = True  # read only views, nothing to size or spawn
+                elif cid.startswith("sh"):
                     ok = shell.open_(cid, _clamp(int(body["cols"]), TERM_COLS),
                                      _clamp(int(body["rows"]), TERM_ROWS))
                 elif cid.startswith("s"):
@@ -273,6 +276,8 @@ class H(BaseHTTPRequestHandler):
                 cards.leave(cid)
                 return self._json({"ok": True})
             if path == "/close":
+                if cid == "desk" or cid.startswith("a"):
+                    return self._send(400, "text/plain", b"the overview and app cards are read only")
                 if cid.startswith("sh"):
                     shell.close(cid)
                     return self._json({"ok": True})
@@ -281,6 +286,8 @@ class H(BaseHTTPRequestHandler):
                 ok = cards.term_close(cid) if cid.startswith("t") else cards.page_close(cid)
                 return self._json({"ok": ok}, 200 if ok else 404)
             if path == "/input":
+                if cid == "desk" or cid.startswith("a"):
+                    return self._send(400, "text/plain", b"the overview and app cards are read only")
                 if cid.startswith("sh"):
                     ok = shell.write(cid, str(body.get("text", ""))[:MAX_INPUT]
                                      + shell.KEYS.get(str(body.get("key", "")), ""))
@@ -341,8 +348,11 @@ class H(BaseHTTPRequestHandler):
             with open(PAGE_FILE, "rb") as f:
                 return self._send(200, "text/html", f.read())
         if path == "/cards":
-            return self._json([{"kind": "files", "id": "files", "title": "files"}]
-                               + shell.cards() + cards.list_cards(self.cfg))
+            head = [{"kind": "files", "id": "files", "title": "files"}]
+            if self.cfg.get("desk_card"):
+                head.insert(0, {"kind": "desk", "id": "desk", "title": "desktop"})
+            tail = apps.cards_list(self.cfg) if self.cfg.get("app_cards") else []
+            return self._json(head + shell.cards() + cards.list_cards(self.cfg) + tail)
         if path == "/theme":
             return self._json(theme.summary())
         if path == "/wallpaper":
@@ -366,7 +376,8 @@ class H(BaseHTTPRequestHandler):
         if cid is None:
             return
         if path == "/term":
-            segs = shell.screen(cid) if cid.startswith("sh") else cards.term_text(cid)
+            segs = (apps.text(cid, self.cfg) if cid.startswith("a") else
+                    shell.screen(cid) if cid.startswith("sh") else cards.term_text(cid))
             return self._send(404, "text/plain", b"gone") if segs is None else self._json(segs)
         if path == "/shot":
             try:

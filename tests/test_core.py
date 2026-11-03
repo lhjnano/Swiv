@@ -25,6 +25,53 @@ def write(path, text):
         f.write(text)
 
 
+class AppCardFlatten(unittest.TestCase):
+    def test_reading_order_lines(self):
+        import apps
+
+        class N:
+            def __init__(self, role="", name="", text=None, kids=()):
+                self.role, self.name, self.text, self.kids = role, name, text, list(kids)
+
+            def get_role_name(self):
+                return self.role
+
+            def get_name(self):
+                return self.name
+
+            def get_child_count(self):
+                return len(self.kids)
+
+            def get_child_at_index(self, i):
+                return self.kids[i]
+
+        class TextN(N):
+            def get_character_count(self):
+                return len(self.text or "")
+
+            def get_text(self, a, b):
+                return self.text or ""
+
+        apps._apps["a1"] = N("frame", "Untitled", kids=[
+            N("push button", "Save"),
+            TextN("text", "", text="hello world"),
+            N("panel", "", kids=[N("label", "Inner")]),
+        ])
+        segs = apps.text("a1", {"app_max_nodes": 50})
+        joined = "".join(x[0] for x in segs)
+        self.assertIn("Untitled", joined)
+        self.assertIn("Save", joined)
+        self.assertIn("hello world", joined)
+        self.assertIn("  Inner", joined)  # nested node is indented
+
+    def test_config_keys(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        ex = json.load(open(os.path.join(root, "config.example.json")))
+        for k in ("desk_card", "app_cards", "app_exclude", "app_max_nodes"):
+            self.assertIn(k, config.DEFAULTS)
+            self.assertIn(k, ex)
+
+
 class Version(unittest.TestCase):
     def test_cli_version(self):
         import subprocess
@@ -179,11 +226,11 @@ class WindowMatch(unittest.TestCase):
 
 class CardIds(unittest.TestCase):
     def test_accept(self):
-        for cid in ("t58720266.0", "t0x3800027f.2", "p9222." + "A" * 32, "s1", "sh0", "sh12"):
+        for cid in ("t58720266.0", "t0x3800027f.2", "p9222." + "A" * 32, "s1", "sh0", "sh12", "a123", "desk"):
             self.assertTrue(server.CARD_RE.match(cid), cid)
 
     def test_reject(self):
-        for cid in ("t1;rm -rf", "p9222./etc", "x1.0", "t1.0\n", "p9222.zz", "s123", "s1\n", "sh", "sh12345"):
+        for cid in ("t1;rm -rf", "p9222./etc", "x1.0", "t1.0\n", "p9222.zz", "s123", "s1\n", "sh", "sh12345", "a", "adesk", "desk2"):
             self.assertIsNone(server.CARD_RE.match(cid), cid)
 
 
@@ -263,6 +310,7 @@ class Http(unittest.TestCase):
     def setUpClass(cls):
         cls.root = os.path.realpath(tempfile.mkdtemp())
         write(os.path.join(cls.root, "note.md"), "# Title\n\ntext")
+        st, h, b = None, None, None  # desk card is first once enabled
         salt = secrets.token_bytes(16)
         server.H.cfg = {**config.DEFAULTS, "auth": "password", "files_root": cls.root,
                         "salt": salt.hex(), "hash": server.hash_password("pw-for-tests", salt)}
@@ -397,6 +445,8 @@ class Http(unittest.TestCase):
 
     def test_files_and_sandbox(self):
         cookie = self.cookie()
+        st, h, b = self.req("GET", "/cards", cookie=cookie)
+        self.assertEqual(json.loads(b)[0]["kind"], "desk")  # overview leads the deck
         status, _, body = self.req("GET", "/files?path=", cookie=cookie)
         self.assertEqual(status, 200)
         data = json.loads(body)

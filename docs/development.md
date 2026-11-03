@@ -7,6 +7,8 @@ server.py   authentication, throttling hook-up, HTTP routes
 config.py   config file location, defaults, load and save
 auth.py     throttling (Limiter), PAM lockout module detection
 screen.py   screen cards for Windows and macOS (mss, Pillow, pynput)
+shell.py    shell cards: server owned ptys (pyte), input works locked
+apps.py     app cards: windows as text via AT-SPI; the backend engine slot
 cards.py    terminal (AT-SPI, xdotool) and browser (CDP) cards, resize, restore
 files.py    file listing and serving, md rendering, sandbox
 geo.py      country allow list (RIR range data, cached weekly)

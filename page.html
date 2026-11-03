@@ -84,6 +84,19 @@ form{display:flex;gap:8px;align-items:stretch}
 #txt:focus{outline:none;border-color:rgba(63,178,111,.6)}
 button{border:0;cursor:pointer;font-family:var(--sans)}
 button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#tabs{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;gap:6px;overflow-x:auto;
+  padding:6px 8px;background:var(--chrome);border-bottom:1px solid var(--line);scrollbar-width:none}
+#tabs::-webkit-scrollbar{display:none}
+#tabs button{flex:none;min-height:32px;padding:0 12px;border-radius:8px;font:12px var(--mono);
+  color:var(--dim);background:rgba(255,255,255,.04);border:1px solid var(--line)}
+#tabs button.on{color:var(--ink);background:var(--acc);border-color:transparent}
+#desk{position:absolute;inset:0;z-index:2;overflow-y:auto;touch-action:pan-y;
+  background:rgba(10,14,12,.7);backdrop-filter:blur(14px)}
+#desk div{display:flex;gap:10px;align-items:baseline;min-height:44px;padding:12px 14px;
+  border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;font:13px/1.4 var(--mono)}
+#desk b{flex:none;color:var(--acc);font-weight:400}
+#desk .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg)}
+#desk .sub{flex:none;font-size:11px;color:var(--dim)}
 .hide{display:none!important}
 @media (prefers-reduced-motion:reduce){#title::after{animation:none}}
 @media (min-width:720px){#app{max-width:520px;margin:0 auto;
@@ -96,7 +109,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset
     <button id=add type=button aria-label="new card">+</button>
     <button id=del type=button aria-label="close card">×</button></header>
   <div id=menu class=hide><button type=button data-k=term>new terminal</button><button type=button data-k=shell>new shell</button><button type=button data-k=page>new browser</button></div>
-  <div id=view><pre id=term class=hide></pre><img id=shot class=hide alt="">
+  <div id=view><div id=tabs class=hide></div><div id=desk class=hide></div><pre id=term class=hide></pre><img id=shot class=hide alt="">
     <div id=empty class=hide><span class=emark>&gt;_</span>no terminal or CDP browser found<span class=sub>tap + to open one</span></div>
     <div id=files class=hide><div id=fbar><button id=fup type=button aria-label="parent folder">↑</button><span id=fpath></span>
       <a id=fopen target=_blank rel=noopener class=hide>new tab</a></div>
@@ -108,7 +121,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset
 </div>
 <script>
 const $=id=>document.getElementById(id);
-let cards=[],cur=-1,timer=null,openId=null;
+let cards=[],views=[],tabSel={},cur=-1,timer=null,openId=null,openTab=null;
 const KEYS=[["Esc","Escape"],["Tab","Tab"],["S-Tab","S-Tab"],["↑","Up"],["↓","Down"],["←","Left"],["→","Right"],["^C","C-c"],["⌫","BSpace"],["⏎","Enter"]];
 
 async function api(path,body){
@@ -124,42 +137,90 @@ function cell(){
   return {w:c.measureText('M').width,h:fs*1.25};
 }
 function leave(id){if(id) navigator.sendBeacon('/leave',JSON.stringify({id}));}
+// views: one entry per window; terminal tabs fold into their window's view
+const GLYPH={files:'\u25a4',shell:'\u276f',term:'\u258c',page:'\u25ce',app:'\u25ec',screen:'\u25a9'};
+function buildViews(){
+  views=[];tabSel={};
+  for(const c of cards){
+    if(c.kind==='term'){
+      const w=c.id.split('.')[0];
+      let v=views.find(x=>x.win===w);
+      if(!v){v={win:w,main:c,tabs:[]};views.push(v);}
+      v.tabs.push(c);
+    }else views.push({win:c.id,main:c,tabs:[c]});
+  }
+}
+function activeTabOf(v){return v.tabs.find(t=>t.id===tabSel[v.win])||v.main;}
+function activeCard(){const v=views[cur];return v?activeTabOf(v):null;}
+function renderTabs(v){
+  const el=$('tabs');el.replaceChildren();
+  for(const t of v.tabs){
+    const b=document.createElement('button');b.type='button';
+    b.textContent=(t.title||'tab').slice(0,18);
+    if(t.id===activeTabOf(v).id)b.classList.add('on');
+    b.onclick=()=>{tabSel[v.win]=t.id;show(cur);};
+    el.append(b);
+  }
+}
+function buildDesk(){
+  const el=$('desk');el.replaceChildren();
+  views.forEach((v,i)=>{
+    if(v.main.kind==='desk')return;
+    const c=activeTabOf(v);
+    const row=document.createElement('div');
+    const g=document.createElement('b');g.textContent=GLYPH[v.main.kind]||'\u00b7';
+    const t=document.createElement('span');t.className='n';t.textContent=c.title||v.main.title;
+    row.append(g,t);
+    if(v.tabs.length>1){const sp=document.createElement('span');sp.className='sub';
+      sp.textContent=v.tabs.length+' tabs';row.append(sp);}
+    row.onclick=()=>show(i);
+    el.append(row);
+  });
+}
 async function show(i){
-  if(!cards.length){$('title').textContent='Swiv';$('pos').textContent='';
-    for(const e of ['term','shot']) $(e).classList.add('hide'); $('empty').classList.remove('hide'); return;}
-  cur=(i+cards.length)%cards.length;
-  const c=cards[cur];
-  if(openId&&openId!==c.id) leave(openId);
-  openId=c.id;
-  $('title').textContent=c.title;$('pos').textContent=`${cur+1}/${cards.length}`;
+  if(!views.length){$('title').textContent='Swiv';$('pos').textContent='';
+    for(const e of ['term','shot','tabs','desk']) $(e).classList.add('hide'); $('empty').classList.remove('hide');
+    document.querySelector('footer').classList.remove('hide'); return;}
+  cur=(i+views.length)%views.length;
+  const v=views[cur],c=activeCard();
+  if(openId&&openId!==v.win&&openTab) leave(openTab);
+  openId=v.win;openTab=c.id;
+  $('title').textContent=c.title;$('pos').textContent=`${cur+1}/${views.length}`;
   $('empty').classList.add('hide');
-  $('term').classList.toggle('hide',c.kind!=='term'&&c.kind!=='shell');$('shot').classList.toggle('hide',c.kind!=='page'&&c.kind!=='screen');
-  $('files').classList.toggle('hide',c.kind!=='files');$('del').classList.toggle('dim',c.kind==='files'||c.kind==='screen');document.querySelector('footer').classList.toggle('hide',c.kind==='files');
+  const k=c.kind;
+  $('term').classList.toggle('hide',k!=='term'&&k!=='shell'&&k!=='app');
+  $('shot').classList.toggle('hide',k!=='page'&&k!=='screen');
+  $('files').classList.toggle('hide',k!=='files');
+  $('desk').classList.toggle('hide',k!=='desk');
+  $('tabs').classList.toggle('hide',v.tabs.length<2);
+  $('del').classList.toggle('dim',k==='files'||k==='screen'||k==='app'||k==='desk');
+  document.querySelector('footer').classList.toggle('hide',k==='files'||k==='desk'||k==='app');
   clearTimeout(timer);
-  if(c.kind==='files'){openId=null;if(!$('flist').childElementCount) dir(fpath);return;}
-  const v=$('view').getBoundingClientRect();
-  if(c.kind==='term'||c.kind==='shell'){
-    const m=cell();
-    await api('/open',{id:c.id,cols:Math.max(20,Math.floor((v.width-16)/m.w)),rows:Math.max(5,Math.floor((v.height-12)/m.h))});
-  }else{
-    await api('/open',{id:c.id,width:Math.round(v.width),height:Math.round(v.height),dpr:Math.min(2,devicePixelRatio||1)});
+  if(k==='desk'){openId=null;openTab=null;buildDesk();return;}
+  if(k==='files'){openId=null;openTab=null;if(!$('flist').childElementCount) dir(fpath);return;}
+  if(v.tabs.length>1) renderTabs(v);
+  const r=$('view').getBoundingClientRect();
+  if(k==='term'||k==='shell'){
+    const m=cell(),th=v.tabs.length>1?44:0;
+    await api('/open',{id:c.id,cols:Math.max(20,Math.floor((r.width-16)/m.w)),rows:Math.max(5,Math.floor((r.height-12-th)/m.h))});
+  }else if(k==='page'||k==='screen'){
+    await api('/open',{id:c.id,width:Math.round(r.width),height:Math.round(r.height),dpr:Math.min(2,devicePixelRatio||1)});
   }
   clearTimeout(timer);poll(c.id);
 }
-async function poll(id){
-  if(id!==openId) return;
-  const c=cards[cur];
-  if(!c||c.kind==='files') return;
+async function poll(cid){
+  const c=activeCard();
+  if(!c||c.id!==cid) return;
   try{
-    if(c.kind==='term'||c.kind==='shell'){
-      const r=await api('/term?id='+encodeURIComponent(id));
+    if(c.kind==='term'||c.kind==='shell'||c.kind==='app'){
+      const r=await api('/term?id='+encodeURIComponent(cid));
       if(r.ok) drawTerm(await r.json());
     }else{
-      const r=await api('/shot?id='+encodeURIComponent(id));
+      const r=await api('/shot?id='+encodeURIComponent(cid));
       if(r.ok){const u=URL.createObjectURL(await r.blob());const old=$('shot').src;$('shot').src=u;if(old) URL.revokeObjectURL(old);}
     }
   }catch(e){}
-  timer=setTimeout(()=>poll(id),(c.kind==='term'||c.kind==='shell')?500:700);
+  timer=setTimeout(()=>poll(cid),(c.kind==='term'||c.kind==='shell')?500:700);
 }
 // desktop theme: wallpaper behind everything, terminal colors/font from the gnome-terminal profile
 let TH=null;
@@ -189,16 +250,17 @@ function drawTerm(segs){
   $('term').replaceChildren(frag);
 }
 async function load(keep){
-  const prev=cards[cur]&&cards[cur].id;
+  const prev=keep||(views[cur]&&views[cur].win);
   cards=await(await api('/cards')).json();
-  let i=Math.max(0,cards.findIndex(c=>c.id===(keep||prev)));
+  buildViews();
+  const i=Math.max(0,views.findIndex(v=>v.win===prev));
   show(i);
 }
 // screen cards: point as a fraction of the shown image (object-fit contain, top aligned)
 function frac(cx,cy){const im=$('shot'),b=im.getBoundingClientRect();if(!im.naturalWidth) return null;
   const s=Math.min(b.width/im.naturalWidth,b.height/im.naturalHeight),w=im.naturalWidth*s;
   return {fx:(cx-b.left-(b.width-w)/2)/w,fy:(cy-b.top)/(im.naturalHeight*s)};}
-function send(ev){const c=cards[cur]; if(c) api('/input',{id:c.id,...ev});}
+function send(ev){const c=activeCard(); if(c) api('/input',{id:c.id,...ev});}
 
 // install as an app: the browser offers this only over HTTPS
 let insEv=null;
@@ -211,7 +273,7 @@ let t0=null;
 $('view').addEventListener('touchstart',e=>{const t=e.touches[0];t0={x:t.clientX,y:t.clientY,at:Date.now()};},{passive:true});
 $('view').addEventListener('touchend',e=>{
   if(!t0) return;
-  const t=e.changedTouches[0],dx=t.clientX-t0.x,dy=t.clientY-t0.y,dt=Date.now()-t0.at,c=cards[cur];t0=null;
+  const t=e.changedTouches[0],dx=t.clientX-t0.x,dy=t.clientY-t0.y,dt=Date.now()-t0.at,c=activeCard();t0=null;
   if(Math.abs(dx)>60&&Math.abs(dx)>2*Math.abs(dy)&&dt<600){show(cur+(dx<0?1:-1));return;}
   if(!c||c.kind!=='page'&&c.kind!=='screen') return;
   const r=$('view').getBoundingClientRect(),
@@ -223,8 +285,8 @@ $('view').addEventListener('touchend',e=>{
 document.addEventListener('keydown',e=>{if(e.target===$('txt'))return;if(e.key==='ArrowRight')show(cur+1);if(e.key==='ArrowLeft')show(cur-1);});
 $('title').onclick=()=>load();
 for(const [label,key] of KEYS){const b=document.createElement('button');b.type='button';b.textContent=label;
-  b.onclick=()=>{const c=cards[cur];if(c) send(c.kind==='term'||c.kind==='shell'?{key}:{type:'key',key});};$('keys').append(b);}
-$('f').onsubmit=e=>{e.preventDefault();const c=cards[cur],text=$('txt').value;if(!c)return;
+  b.onclick=()=>{const c=activeCard();if(c) send(c.kind==='term'||c.kind==='shell'?{key}:{type:'key',key});};$('keys').append(b);}
+$('f').onsubmit=e=>{e.preventDefault();const c=activeCard(),text=$('txt').value;if(!c)return;
   if(c.kind==='term'||c.kind==='shell') send({text,key:'Enter'}); else {if(text) send({type:'text',text}); send({type:'key',key:'Enter'});}
   $('txt').value='';};
 // file card: list folders under the server root, view files in a sandboxed frame
@@ -272,19 +334,21 @@ for(const b of $('menu').querySelectorAll('button')) b.onclick=async()=>{
   for(let i=0;i<15;i++){  // new window shows up in the card list after a moment
     await new Promise(z=>setTimeout(z,500));
     const now=await(await api('/cards')).json(),fresh=now.find(c=>!before.has(c.id)&&c.kind===kind);
-    if(fresh){cards=now;show(cards.indexOf(fresh));return;}
+    if(fresh){cards=now;buildViews();show(views.findIndex(v=>v.tabs.some(t=>t.id===fresh.id)));return;}
   }
   load();
 };
 $('del').onclick=async()=>{
-  const c=cards[cur];if(!c||c.kind==='files'||c.kind==='screen'||!confirm(`close "${c.title}"?`))return;
-  clearTimeout(timer);openId=null;
+  const c=activeCard();
+  if(!c||['files','screen','app','desk'].includes(c.kind)||!confirm(`close "${c.title}"?`))return;
+  clearTimeout(timer);openId=null;openTab=null;
   await api('/close',{id:c.id});
   await new Promise(z=>setTimeout(z,800));
-  cards=await(await api('/cards')).json();show(Math.min(cur,cards.length-1));
+  await load();
+  show(Math.min(cur,views.length-1));
 };
-addEventListener('pagehide',()=>leave(openId));
-document.addEventListener('visibilitychange',()=>{if(document.hidden){leave(openId);openId=null;clearTimeout(timer);}else load();});
+addEventListener('pagehide',()=>leave(openTab));
+document.addEventListener('visibilitychange',()=>{if(document.hidden){leave(openTab);openId=null;openTab=null;clearTimeout(timer);}else load();});
 let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>show(cur),300);});
 if('serviceWorker' in navigator&&isSecureContext)navigator.serviceWorker.register('/sw.js');
 applyTheme().finally(()=>load());

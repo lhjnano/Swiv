@@ -34,6 +34,13 @@ full list is in `config.example.json`. Run `make restart` after changing it.
   that browser
 - `cert`, `key` (default `""`): set both to serve HTTPS;
   see [https.md](https.md)
+- `shell` (default `""`): program run in shell cards; empty uses $SHELL,
+  then bash
+- `desk_card` (default `true`): show the desktop overview card
+- `app_cards` (default `true`): show read only cards for other app windows
+- `app_exclude` (default `["chrom", "gnome-terminal", "gnome-shell", "@!"]`):
+  app name or window title parts that never become app cards
+- `app_max_nodes` (default `400`): accessibility nodes flattened per app card
 - `idle_restore_sec` (default `20`): seconds without a phone poll before window
   sizes are restored
 - `session_days` (default `7`): how long a login stays valid

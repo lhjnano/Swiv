@@ -9,6 +9,15 @@
   "chrome_bin": "",
   "chrome_profile": "~/.config/swiv/chrome",
   "shell": "",
+  "desk_card": true,
+  "app_cards": true,
+  "app_exclude": [
+    "chrom",
+    "gnome-terminal",
+    "gnome-shell",
+    "@!"
+  ],
+  "app_max_nodes": 400,
   "cert": "",
   "key": "",
   "idle_restore_sec": 20,

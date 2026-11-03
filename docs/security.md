@@ -21,6 +21,9 @@
   lines with a timestamp and the client IP go to the service journal
   (`make logs`), or to the output of a manual run. A blocked client logs one
   line per lockout period, not one per attempt, so a flood cannot fill the disk.
+- Shell cards run a shell as your account behind the same login and limits.
+  Unlike terminal cards, their input also works while the desktop is locked,
+  because they never touch the X keyboard.
 - An optional country filter (`allowed_countries` in the config) refuses
   connections from outside the listed countries before the login page, using the
   public RIR range data refreshed weekly. It cuts foreign scanners, but cannot

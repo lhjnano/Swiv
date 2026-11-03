@@ -14,6 +14,10 @@ takes the content and redraws it for the phone.
   its mobile layout.
 - File card: browse a folder and open md (rendered), html, images, PDF and text
   files.
+- The desktop overview card lists every open window; terminal tabs fold into
+  one card per window, and other apps appear as read only text cards.
+- Shell cards from the + menu: shells inside swiv whose input also works
+  while the desktop is locked.
 - The desktop wallpaper and the default terminal profile (colors, transparency,
   font) are mirrored.
 

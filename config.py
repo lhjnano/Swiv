@@ -16,6 +16,10 @@ DEFAULTS = {
     "chrome_bin": "",
     "chrome_profile": os.path.join(_XDG, "swiv", "chrome"),
     "shell": "",  # program of the shell cards; empty = $SHELL, then bash
+    "desk_card": True,  # the desktop overview card
+    "app_cards": True,  # read only cards for other app windows (accessibility)
+    "app_exclude": ["chrom", "gnome-terminal", "gnome-shell", "@!"],  # name/title parts
+    "app_max_nodes": 400,  # accessibility nodes flattened per app card
     # set both to serve HTTPS (see docs/https.md); empty keeps plain HTTP
     "cert": "",
     "key": "",

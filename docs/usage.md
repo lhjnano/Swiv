@@ -1,5 +1,11 @@
 # Usage
 
+- The first card is the desktop overview: every open window at a glance,
+  tap a row to jump to it
+- Terminal tabs share one card per window: switch tabs on the strip at the
+  top of the card
+- App cards show other windows (editors, file managers, ...) as read only
+  text, driven by AT-SPI
 - Swipe left or right: next or previous card (over 60px, more than twice the
   vertical move, within 0.6s)
 - Tap: click on a browser or screen card. Vertical drag: scroll it
