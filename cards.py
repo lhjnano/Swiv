@@ -115,8 +115,8 @@ def _xid_of(frame, wins, used):
 def _terminal_cards():
     cards = []
     _terms.clear()
-    if Atspi is None:
-        return cards
+    if Atspi is None or not shutil.which("xdotool"):
+        return cards  # terminal cards need X11 tooling; skip cleanly without it
     desk = Atspi.get_desktop(0)
     wins, used, memo = _windows(), set(), {}
     for i in range(desk.get_child_count()):
