@@ -71,3 +71,7 @@ xdotool, wmctrl, xprop, xclip, ffmpeg, fontconfig (fc-match), gnome-terminal
 - [Security](docs/security.md): login, throttling, sandbox, network
 - [Troubleshooting](docs/troubleshooting.md), uninstall
 - [Development](docs/development.md): layout, tests, CI
+
+## License
+
+MIT, see [LICENSE](LICENSE).
