@@ -1,0 +1,22 @@
+{
+  "bind": "0.0.0.0",
+  "port": 6090,
+  "display": ":0",
+  "files_root": "~",
+  "cdp_ports": [
+    9222
+  ],
+  "chrome_bin": "",
+  "chrome_profile": "~/.config/swiv/chrome",
+  "idle_restore_sec": 20,
+  "session_days": 7,
+  "auth": "pam",
+  "pam_service": "login",
+  "pam_dir": "/etc/pam.d",
+  "login_max_failures": 5,
+  "login_global_max_failures": 20,
+  "login_window_min": 15,
+  "login_lockout_min": 10,
+  "allowed_countries": [],
+  "wallpaper_width": 1440
+}

@@ -1,0 +1,13 @@
+[Unit]
+Description=swiv: phone view of desktop terminals, browsers and files
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Environment=PYTHONNOUSERSITE=1
+ExecStart="@PYTHON@" "@DIR@/server.py"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
