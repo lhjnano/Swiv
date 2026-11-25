@@ -112,9 +112,7 @@ DEFAULTS = {
             "nodes_path": os.path.expanduser(
                 "~/.cache/opencode-usage-coach/shared/nodes.ndjson"
             ),
-            "rules_path": os.path.expanduser(
-                "~/.cache/opencode-usage-coach/projects/d75b58a64b6c/rules.md"
-            ),
+            "rules_path": "",  # "": every project's rules.md under the harness cache
             "max_chars": 6000,
         },
     },

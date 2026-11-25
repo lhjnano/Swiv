@@ -196,9 +196,18 @@ def nodes_for(query, limit=TOP_NODES, path=None):
     return search(query, load_nodes(path), limit=limit)
 
 
+def load_rules_all(spec=""):
+    """The rules of every file `spec` names, in file order: a path or a glob,
+    and with nothing given every rules.md under the coach cache."""
+    out = []
+    for path in _rule_paths(spec):
+        out.extend(load_rules(path))
+    return out
+
+
 def rules_always(always_rules=(), paths=None):
     """Rules whose title contains any of the given substrings, body intact.
-    Generic rules ("Diagnose before acting") belong in this always-on list;
+    Generic rules ("Read the log first" in the tests) belong in this always-on list;
     project-specific ones stay out. Defaults to every rules.md under the
     coach cache."""
     paths = paths if paths is not None else sorted(glob.glob(os.path.expanduser(DEFAULT_RULES_GLOB)))

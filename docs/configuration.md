@@ -85,9 +85,10 @@ full list is in `config.example.json`. Run `make restart` after changing it.
     at a local time or every so often, for example
     `[{"name": "briefing", "at": "07:30", "days": [1, 2, 3, 4, 5], "text": "..."}]`
     or `{"name": "status", "every_min": 120, "text": "..."}`
-  - `coach`: `enabled` (default `false`), `nodes_path`, `rules_path`,
-    `max_chars` (default `6000`): knowledge from the opencode usage-coach
-    harness, read only
+  - `coach`: knowledge from the opencode usage-coach harness, read only:
+    `enabled` (default `false`), `nodes_path`, `rules_path` (default empty:
+    every project's rules.md under that harness's cache), `max_chars`
+    (default `6000`)
 
 `python3 agent.py --rules | --rule "<rule>" | --schedule | --once "<request>"`
 works at the command line on the same config: list or add rules, check the

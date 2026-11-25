@@ -64,6 +64,9 @@ def agent_cfg(**overrides):
     rules of the user's own and nothing scheduled unless a test brings them."""
     cfg = copy.deepcopy(config.DEFAULTS["agent"])
     cfg.update(rules_path="", schedule=[])
+    nowhere = os.path.join(tempfile.gettempdir(), "swiv-agent-nothing")  # no such folder
+    cfg["coach"].update(rules_path=os.path.join(nowhere, "rules.md"),
+                        nodes_path=os.path.join(nowhere, "nodes.ndjson"))
     cfg.update(overrides)
     return cfg
 
@@ -395,24 +398,24 @@ class SystemPrompt(unittest.TestCase):
         cls.nodes_path = os.path.join(cls.dir, "nodes.ndjson")
         cls.rules_path = os.path.join(cls.dir, "rules.md")
         write(cls.nodes_path, "\n".join([
-            json.dumps({"id": "n1", "type": "fact", "name": "jekyll blog post publish flow",
-                        "props": {"result": "draft를 쓴 뒤 front matter를 확인하고 build한다."},
-                        "keywords": ["jekyll", "blog"], "source": "impl-note", "confidence": 0.9,
+            json.dumps({"id": "n1", "type": "fact", "name": "sourdough starter feeding schedule",
+                        "props": {"result": "물과 밀가루를 같은 무게로 섞어 따뜻한 곳에 둔다"},
+                        "keywords": ["sourdough", "starter"], "source": "impl-note", "confidence": 0.9,
                         "ts": "2026-11-20T09:00:00Z", "lastAccessed": "2026-11-20T09:00:00Z",
                         "accessCount": 5}, ensure_ascii=False),
-            json.dumps({"id": "n2", "type": "fact", "name": "zfs storage pool layout",
-                        "props": {"result": "pool vdev notes"}, "keywords": ["zfs", "storage"],
+            json.dumps({"id": "n2", "type": "fact", "name": "greenhouse watering layout",
+                        "props": {"result": "soil moisture notes"}, "keywords": ["greenhouse", "watering"],
                         "source": "impl-note", "confidence": 0.9,
                         "ts": "2026-11-20T09:00:00Z", "lastAccessed": "2026-11-20T09:00:00Z",
                         "accessCount": 500}, ensure_ascii=False),
         ]) + "\n")
         write(cls.rules_path,
-              "## Rule (2026-07-09)\n"
-              "**Diagnose before acting.** Never implement a fix from a problem description.\n"
-              "Origin: a cancel was read as a failure.\n"
+              "## Rule (2030-01-05)\n"
+              "**Read the log first.** Never change code from a guess.\n"
+              "Origin: a timeout was read as a crash.\n"
               "\n"
-              "## Rule (2026-11-01)\n"
-              "**Measure first.** Set thresholds below the measured value.\n"
+              "## Rule (2030-03-01)\n"
+              "**Count first.** Choose a size from what was counted.\n"
               "Origin: tests.\n")
 
     @classmethod
@@ -428,7 +431,7 @@ class SystemPrompt(unittest.TestCase):
         paths = {"nodes_path": self.nodes_path, "rules_path": self.rules_path}
         return self.cfg(enabled, **{**paths, **coach})
 
-    def block(self, cfg, query="jekyll blog"):
+    def block(self, cfg, query="sourdough starter"):
         """The part of the prompt that comes after the base prompt."""
         prompt = agent.system_prompt(cfg, query)
         self.assertTrue(prompt.startswith(agent.BASE_PROMPT), "the base prompt must lead")
@@ -447,11 +450,11 @@ class SystemPrompt(unittest.TestCase):
         block = self.block(self.fixtures())
         self.assertTrue(block.startswith("\n\n[coach]"), block[:40])
         self.assertIn("## 행동 규칙 (검증됨)", block)
-        self.assertIn("Diagnose before acting. (2026-07-09)", block)
-        self.assertIn("Measure first. (2026-11-01)", block)
+        self.assertIn("Read the log first. (2030-01-05)", block)
+        self.assertIn("Count first. (2030-03-01)", block)
         self.assertIn("## 장기 기억 (관련 노드)", block)
-        self.assertIn("jekyll blog post publish flow", block)  # matches the query
-        self.assertNotIn("zfs storage pool layout", block)  # does not
+        self.assertIn("sourdough starter feeding schedule", block)  # matches the query
+        self.assertNotIn("greenhouse watering layout", block)  # does not
         self.assertLess(block.index("## 행동 규칙"), block.index("## 장기 기억"))
 
     def test_enabled_with_nothing_to_inject_gives_the_base_prompt(self):
@@ -482,10 +485,10 @@ class SystemPrompt(unittest.TestCase):
         llm = ScriptedLLM([reply("답")])
         with mock.patch.object(agent, "llm_chat", llm), \
                 mock.patch.object(agent, "_agent_cfg", return_value=cfg):
-            self.assertEqual(agent.run_turn(agent.AgentSession(), "jekyll blog"), "done")
+            self.assertEqual(agent.run_turn(agent.AgentSession(), "sourdough starter"), "done")
         system = llm.calls[0][0][0]
-        self.assertEqual(system, {"role": "system", "content": agent.system_prompt(cfg, "jekyll blog")})
-        self.assertIn("jekyll blog post publish flow", system["content"])
+        self.assertEqual(system, {"role": "system", "content": agent.system_prompt(cfg, "sourdough starter")})
+        self.assertIn("sourdough starter feeding schedule", system["content"])
 
 
 # --- the turn ------------------------------------------------------------------
@@ -1711,7 +1714,7 @@ class OwnRules(unittest.TestCase):
     def test_the_users_rules_come_before_the_coach_block(self):
         agent.add_rule(self.cfg, "**내 규칙**", "x")
         harness = os.path.join(self.dir, "harness.md")
-        write(harness, "## Rule (2026-07-09)\n**하네스 규칙**\n\n몸통\n")
+        write(harness, "## Rule (2030-05-05)\n**하네스 규칙**\n\n몸통\n")
         cfg = agent_cfg(rules_path=self.path, coach={"enabled": True, "rules_path": harness,
                                                      "nodes_path": os.path.join(self.dir, "none")})
         prompt = agent.system_prompt(cfg, "질문")

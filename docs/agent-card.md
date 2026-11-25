@@ -284,7 +284,7 @@ def run_turn(session, user_text):
   `id, type, name, props, keywords, source, ts, accessCount`. 현재 1548개. props.result에
   사실/결정/제약이 요약돼 있다
 - 룰: `~/.cache/opencode-usage-coach/projects/*/rules.md` — `## Rule (날짜)` 섹션 단위의
-  검증된 행동 규칙(예: "Diagnose before acting"), 본문에 패턴과 Origin이 붙는다
+  검증된 행동 규칙(제목과 날짜가 있는 블록), 본문에 패턴과 Origin이 붙는다
 
 `coach.py` (순수 표준 라이브러리, 외부 의존성 없음)의 설계:
 
@@ -293,7 +293,7 @@ def run_turn(session, user_text):
   각 노드는 `name: props.result 앞 400자` 스니펫으로 줄인다. 1548개 선형 스캔이라
   색인 없이도 충분히 빠르다(Phase 2에서 100ms 기준 측정)
 - `rules_always()` — rules.md의 `## Rule` 섹션 중 `agent.coach.always_rules` 제목
-  부분 일치 목록에 해당하는 것을 본문째로 반환한다. 범용 룰("Diagnose before acting")
+  부분 일치 목록에 해당하는 것을 본문째로 반환한다. 범용 룰(제목으로 고르는 것)
   은 이 상시 주입 리스트에 두고, 프로젝트 특이 룰은 상시에서 뺀다
 - 주입 예산: 시스템 프롬프트의 coach 영역 전체를 상한(기본 6000자)으로 절단한다. 노드
   스니펫이 예산을 넘으면 점수 순으로 잘라낸다. 토큰 비용 통제의 1차 수단이다

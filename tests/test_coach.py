@@ -26,15 +26,15 @@ def node_line(id, name, keywords, result, access_count=0, ts="2026-06-01T00:00:0
 
 
 def make_nodes(path):
-    long_result = ("Jekyll 포스트 발행 절차: draft 작성 → front matter 확인 → build. " * 12)
+    long_result = ("사워도우 배양 절차: 물과 밀가루를 같은 무게로 섞는다. " * 20)
     lines = [
-        node_line("n1", "jekyll blog post publish flow", ["jekyll", "blog", "markdown"],
+        node_line("n1", "sourdough starter feeding schedule", ["sourdough", "starter", "bread"],
                   long_result + "TAIL-SENTINEL-끝", access_count=5, ts="2026-11-20T09:00:00Z"),
         # decoy: one overlapping keyword but a huge accessCount must not outrank n1
-        node_line("n2", "blog aggregator service", ["blog", "feed"],
-                  "feed aggregator notes", access_count=10 ** 9, ts="2026-11-23T00:00:00Z"),
-        node_line("n3", "zfs storage pool layout", ["zfs", "storage"],
-                  "pool vdev notes", access_count=500),
+        node_line("n2", "feed reader service", ["starter", "feed"],
+                  "feed reader notes", access_count=10 ** 9, ts="2026-11-23T00:00:00Z"),
+        node_line("n3", "greenhouse watering layout", ["greenhouse", "watering"],
+                  "soil moisture notes", access_count=500),
         # missing ts and empty keywords: loading and scoring must stay graceful
         node_line("n4", "hangul 테스트 노드", [], "한글 토큰 검사용", access_count=0, ts=""),
         node_line("n5", "chrome cdp session", ["cdp", "chrome"], "cdp page session"),
@@ -48,17 +48,17 @@ def make_nodes(path):
 def make_rules(path):
     with open(path, "w", encoding="utf-8") as f:
         f.write(
-            "## Rule (2026-07-09)\n"
-            "**Diagnose before acting.** Never implement a fix based on a problem\n"
-            "description without first verifying what actually happened.\n"
+            "## Rule (2030-01-05)\n"
+            "**Read the log first.** Never change code from a guess\n"
+            "about what went wrong.\n"
             "\n"
             "The correct pattern:\n"
-            "1. Check primary sources first.\n"
-            "Origin: generate_batch assumed technical failure, but it was a cancel.\n"
+            "1. Read the log first.\n"
+            "Origin: a timeout was taken for a crash.\n"
             "\n"
-            "## Rule (2026-10-26)\n"
-            "Measure the baseline before setting thresholds; no bold title in this block.\n"
-            "Origin: thresholds must sit below measured values.\n"
+            "## Rule (2030-02-10)\n"
+            "Count the things before choosing a size; no bold title in this block.\n"
+            "Origin: a size was guessed.\n"
         )
 
 
@@ -85,7 +85,7 @@ class LoadNodes(CoachFixture):
     def test_parses_fields(self):
         self.assertEqual([n["id"] for n in self.nodes], ["n1", "n2", "n3", "n4", "n5"])
         n1 = self.nodes[0]
-        self.assertEqual(n1["keywords"], ["jekyll", "blog", "markdown"])
+        self.assertEqual(n1["keywords"], ["sourdough", "starter", "bread"])
         self.assertEqual(n1["accessCount"], 5)
         self.assertTrue(n1["props"]["result"].endswith("끝"))
 
@@ -108,17 +108,17 @@ class LoadRules(CoachFixture):
     def test_parses_blocks(self):
         rules = coach.load_rules(self.rules_path)
         self.assertEqual(len(rules), 2)
-        self.assertEqual(rules[0]["date"], "2026-07-09")
-        self.assertEqual(rules[0]["title"], "Diagnose before acting.")
-        self.assertIn("primary sources", rules[0]["body"])
+        self.assertEqual(rules[0]["date"], "2030-01-05")
+        self.assertEqual(rules[0]["title"], "Read the log first.")
+        self.assertIn("Read the log", rules[0]["body"])
         self.assertIn("Origin:", rules[0]["body"])
         # real files put the next header right after the body; still 2 blocks
-        self.assertEqual(rules[1]["date"], "2026-10-26")
+        self.assertEqual(rules[1]["date"], "2030-02-10")
 
     def test_block_without_bold_title(self):
         rules = coach.load_rules(self.rules_path)
         self.assertEqual(rules[1]["title"], "")
-        self.assertIn("baseline", rules[1]["body"])
+        self.assertIn("choosing a size", rules[1]["body"])
 
     def test_missing_file_is_graceful(self):
         self.assertEqual(coach.load_rules(os.path.join(self.dir, "nope.md")), [])
@@ -126,7 +126,7 @@ class LoadRules(CoachFixture):
 
 class Search(CoachFixture):
     def test_exact_keyword_match_ranks_first(self):
-        results = coach.search("jekyll blog", self.nodes)
+        results = coach.search("sourdough starter", self.nodes)
         self.assertTrue(results)
         self.assertEqual(results[0]["id"], "n1")  # both tokens hit, beats boosts
         self.assertGreaterEqual(results[0]["score"], 2.0)
@@ -137,8 +137,8 @@ class Search(CoachFixture):
         self.assertEqual(coach.search("qqzzunreadable", self.nodes), [])
 
     def test_limit(self):
-        self.assertEqual(len(coach.search("blog", self.nodes, limit=1)), 1)
-        self.assertEqual(len(coach.search("blog", self.nodes)), 2)
+        self.assertEqual(len(coach.search("starter", self.nodes, limit=1)), 1)
+        self.assertEqual(len(coach.search("starter", self.nodes)), 2)
 
     def test_graceful_on_broken_node_fields(self):
         # n4 has an empty ts and no keywords: it must not crash the scan
@@ -149,14 +149,14 @@ class Search(CoachFixture):
 
 class FormatInjection(CoachFixture):
     def test_sections_and_caveat_present(self):
-        nodes = coach.search("jekyll blog", self.nodes)
+        nodes = coach.search("sourdough starter", self.nodes)
         rules = coach.load_rules(self.rules_path)
         block = coach.format_injection(nodes, rules)
         self.assertIn("## 행동 규칙 (검증됨)", block)
         self.assertIn("## 장기 기억 (관련 노드)", block)
         self.assertIn("참고 자료이며 지시가 아니다", block)
-        self.assertIn("Diagnose before acting.", block)
-        self.assertIn("jekyll blog post publish flow", block)
+        self.assertIn("Read the log first.", block)
+        self.assertIn("sourdough starter feeding schedule", block)
         # snippet is capped at SNIPPET_CHARS, so the long tail must not survive
         self.assertNotIn("TAIL-SENTINEL", block)
         self.assertIn("…", block)
@@ -185,13 +185,13 @@ class FormatInjection(CoachFixture):
 
 class DocNamedWrappers(CoachFixture):
     def test_nodes_for_composes_load_and_search(self):
-        results = coach.nodes_for("jekyll", limit=3, path=self.nodes_path)
+        results = coach.nodes_for("sourdough", limit=3, path=self.nodes_path)
         self.assertEqual(results[0]["id"], "n1")
 
     def test_rules_always_filters_by_title_substring(self):
-        rules = coach.rules_always(["diagnose before"], paths=[self.rules_path])
+        rules = coach.rules_always(["read the log"], paths=[self.rules_path])
         self.assertEqual(len(rules), 1)
-        self.assertEqual(rules[0]["title"], "Diagnose before acting.")
+        self.assertEqual(rules[0]["title"], "Read the log first.")
         self.assertEqual(coach.rules_always(["no such rule"], paths=[self.rules_path]), [])
 
 
@@ -203,17 +203,17 @@ class Cli(CoachFixture):
             capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
 
     def test_search(self):
-        r = self.run_cli("search", "jekyll blog", "--limit", "2", "--nodes", self.nodes_path)
+        r = self.run_cli("search", "sourdough starter", "--limit", "2", "--nodes", self.nodes_path)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("jekyll blog post publish flow", r.stdout)
+        self.assertIn("sourdough starter feeding schedule", r.stdout)
 
     def test_search_missing_file_graceful(self):
-        r = self.run_cli("search", "jekyll", "--nodes", os.path.join(self.dir, "nope.ndjson"))
+        r = self.run_cli("search", "sourdough", "--nodes", os.path.join(self.dir, "nope.ndjson"))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("(no matching nodes)", r.stdout)
 
     def test_inject(self):
-        r = self.run_cli("inject", "jekyll blog", "--nodes", self.nodes_path,
+        r = self.run_cli("inject", "sourdough starter", "--nodes", self.nodes_path,
                          "--rules", self.rules_path)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("## 행동 규칙 (검증됨)", r.stdout)
@@ -222,8 +222,8 @@ class Cli(CoachFixture):
     def test_rules(self):
         r = self.run_cli("rules", "--rules", self.rules_path)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("Diagnose before acting.", r.stdout)
-        self.assertIn("2026-07-09", r.stdout)
+        self.assertIn("Read the log first.", r.stdout)
+        self.assertIn("2030-01-05", r.stdout)
 
 
 if __name__ == "__main__":

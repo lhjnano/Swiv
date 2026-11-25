@@ -96,7 +96,7 @@
     "coach": {
       "enabled": false,
       "nodes_path": "~/.cache/opencode-usage-coach/shared/nodes.ndjson",
-      "rules_path": "~/.cache/opencode-usage-coach/projects/d75b58a64b6c/rules.md",
+      "rules_path": "",
       "max_chars": 6000
     }
   }

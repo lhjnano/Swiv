@@ -1089,7 +1089,7 @@ def _coach_block(coach_cfg, query):
     """Every rule of the configured rules file, then the nodes matching the
     query, within the configured budget."""
     nodes = coach.search(query, coach.load_nodes(coach_cfg.get("nodes_path")))
-    rules = coach.load_rules(coach_cfg.get("rules_path") or "")
+    rules = coach.load_rules_all(coach_cfg.get("rules_path") or "")
     max_chars = int(_num(coach_cfg.get("max_chars"), coach.BUDGET_CHARS))
     return coach.format_injection(nodes, rules, max_chars=max_chars)
 
