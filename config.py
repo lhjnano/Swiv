@@ -36,6 +36,63 @@ DEFAULTS = {
     "login_window_min": 15,
     "login_lockout_min": 10,
     "allowed_countries": [],  # ISO codes, for example ["KR"]; empty = no country filter
+    # agent chat card (docs/agent-card.md); off until enabled
+    "agent": {
+        "enabled": False,  # show the card and its endpoints
+        "base_url": "",  # OpenAI compatible endpoint, for example http://127.0.0.1:11434/v1
+        "api_key": "",  # secret; keep it in config.json only and never log it
+        "model": "",
+        "max_tokens": 2048,
+        "temperature": 0.3,
+        # shell whitelist and blocklist; the git entries include the subcommand
+        "allow_commands": [
+            "ls",
+            "cat",
+            "head",
+            "tail",
+            "grep",
+            "find",
+            "df",
+            "du",
+            "ps",
+            "uname",
+            "uptime",
+            "pwd",
+            "which",
+            "git status",
+            "git log",
+            "git diff",
+            "git show",
+        ],
+        "block_commands": [
+            "sudo",
+            "su",
+            "mkfs",
+            "dd",
+            "shutdown",
+            "reboot",
+            "poweroff",
+            "systemctl",
+            "rm",
+            "chmod",
+            "chown",
+            "mv",
+            "kill",
+        ],
+        "approval_timeout_sec": 120,
+        "shell_timeout_sec": 60,
+        # knowledge layer (the coach section of docs/agent-card.md)
+        "coach": {
+            "enabled": False,
+            "nodes_path": os.path.expanduser(
+                "~/.cache/opencode-usage-coach/shared/nodes.ndjson"
+            ),
+            "rules_path": os.path.expanduser(
+                "~/.cache/opencode-usage-coach/projects/d75b58a64b6c/rules.md"
+            ),
+            "max_chars": 6000,
+        },
+    },
 }
 
 

@@ -48,7 +48,7 @@ header button:active{transform:scale(.95)}
   display:grid;place-items:center;font:15px var(--mono);color:var(--acc);
   background:rgba(255,255,255,.04)}
 #empty .sub{font:12px var(--sans)}
-#files{display:flex;flex-direction:column;height:100%;background:rgba(10,14,12,.7);
+#files,#chat{display:flex;flex-direction:column;height:100%;background:rgba(10,14,12,.7);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 #fbar{display:flex;align-items:center;gap:6px;padding:6px 8px;min-height:56px;
   border-bottom:1px solid var(--line)}
@@ -83,7 +83,7 @@ form{display:flex;gap:8px;align-items:stretch}
 #txt::placeholder{color:rgba(232,235,233,.45)}
 #txt:focus{outline:none;border-color:rgba(63,178,111,.6)}
 button{border:0;cursor:pointer;font-family:var(--sans)}
-button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 #tabs{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;gap:6px;overflow-x:auto;
   padding:6px 8px;background:var(--chrome);border-bottom:1px solid var(--line);scrollbar-width:none}
 #tabs::-webkit-scrollbar{display:none}
@@ -97,6 +97,88 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset
 #desk b{flex:none;color:var(--acc);font-weight:400}
 #desk .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg)}
 #desk .sub{flex:none;font-size:11px;color:var(--dim)}
+/* agent chat card: an answer is a document, built block by block from the server's
+   markdown tree; tool calls are quiet lines; the approval is the one thing that
+   stands out; Korean text keeps its words whole */
+#msgs{flex:1;overflow-y:auto;touch-action:pan-y;display:flex;flex-direction:column;gap:10px;padding:14px 12px;
+  font:15px/1.65 var(--sans);word-break:keep-all;overflow-wrap:anywhere}
+#msgs .u{align-self:flex-end;max-width:86%;padding:8px 12px;border-radius:16px 16px 4px 16px;white-space:pre-wrap;
+  background:rgba(63,178,111,.16);border:1px solid rgba(63,178,111,.3)}
+#msgs .b{align-self:stretch;min-width:0;padding:0 2px 4px;white-space:normal}
+#msgs .b>:last-child>:last-child{margin-bottom:0}
+#msgs .b p{margin:0 0 10px}
+#msgs .b h1,#msgs .b h2,#msgs .b h3,#msgs .b h4{margin:16px 0 6px;font-weight:650;line-height:1.35}
+#msgs .b h1{font-size:19px}#msgs .b h2{font-size:17px}#msgs .b h3,#msgs .b h4{font-size:15.5px}
+#msgs .b ul,#msgs .b ol{margin:0 0 10px;padding-left:22px}
+#msgs .b li{margin:3px 0}
+#msgs .b li>p{margin:0}
+#msgs .b blockquote{margin:0 0 10px;padding:2px 0 2px 12px;border-left:3px solid var(--acc);color:var(--dim)}
+#msgs .b hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+#msgs .b a{color:#8fd9b0;text-decoration:underline;text-decoration-color:rgba(143,217,176,.35);text-underline-offset:3px}
+#msgs .b :not(pre)>code{font:.92em var(--mono);color:#c9e9d6;background:rgba(63,178,111,.12);padding:1px 5px;border-radius:5px}
+#msgs .e{align-self:flex-start;max-width:88%;padding:9px 12px;border-radius:14px 14px 14px 4px;font:14px/1.5 var(--sans);
+  background:rgba(226,105,95,.12);border:1px solid rgba(226,105,95,.4);color:#f4b4ae}
+#typing{align-self:flex-start;padding:4px 2px;font:15px/1 var(--mono);color:var(--dim)}
+/* code: a language word and a copy button over the block */
+#msgs .cb{margin:10px 0;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.035)}
+#msgs .ch{display:flex;align-items:center;justify-content:space-between;min-height:36px;padding:0 6px 0 12px;
+  border-bottom:1px solid var(--line)}
+#msgs .ch span{font:12px var(--mono);color:var(--dim)}
+#msgs .ch button{min-height:30px;padding:0 12px;border-radius:7px;font:13px var(--sans);color:var(--dim);background:none}
+#msgs .ch button:active{color:var(--fg);background:rgba(255,255,255,.07)}
+#msgs .cb pre{margin:0;padding:10px 12px;overflow-x:auto;touch-action:auto;font:12.5px/1.55 var(--mono);color:#dde4df;
+  white-space:pre;word-break:normal}
+#msgs .cb .k,#msgs .cb .kc,#msgs .cb .kd,#msgs .cb .kn,#msgs .cb .kp,#msgs .cb .kr,#msgs .cb .kt{color:#8fd9b0}
+#msgs .cb .s,#msgs .cb .sa,#msgs .cb .sb,#msgs .cb .sc,#msgs .cb .sd,#msgs .cb .se,#msgs .cb .sh,#msgs .cb .si,
+#msgs .cb .sx,#msgs .cb .s1,#msgs .cb .s2,#msgs .cb .dl{color:#d9c27e}
+#msgs .cb .c,#msgs .cb .c1,#msgs .cb .cm,#msgs .cb .cs{color:#71807a;font-style:italic}
+#msgs .cb .m,#msgs .cb .mi,#msgs .cb .mf,#msgs .cb .mh,#msgs .cb .nb,#msgs .cb .nc,#msgs .cb .nf,#msgs .cb .nt{color:#9ec3e0}
+#msgs .tw{overflow-x:auto;touch-action:auto;margin:4px 0 12px}
+#msgs table{border-collapse:collapse;font:13.5px/1.45 var(--sans)}
+#msgs th,#msgs td{padding:6px 14px 6px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+#msgs th{color:var(--dim);font-weight:500}
+/* tool calls: one quiet line each; the arguments and the result fold away */
+#msgs .t{align-self:stretch;min-height:34px;padding:0;border-radius:8px;background:none;display:flex;align-items:center;gap:8px;
+  font:12.5px/1.4 var(--mono);color:var(--dim);text-align:left}
+#msgs .t b{flex:1;min-width:0;font-weight:400;color:#b9c6bf;text-align:left;overflow-wrap:anywhere}
+#msgs .t .st{flex:none;font-size:12px}
+#msgs .t .st.wait{color:#d9c27e}
+#msgs .t .st.bad{color:var(--danger)}
+#msgs .to{align-self:stretch;margin:-4px 0 4px;padding:6px 0 6px 12px;border-left:2px solid var(--line);
+  font:12px/1.5 var(--mono);color:var(--dim);white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+/* approval: what will run, in full, and the two answers */
+#msgs .a{align-self:stretch;padding:12px 14px;border:1px solid rgba(63,178,111,.45);border-radius:12px;
+  background:rgba(63,178,111,.07)}
+#msgs .a small{display:block;margin-bottom:8px;font:12.5px/1.45 var(--sans);color:var(--dim)}
+#msgs .a pre{margin:0;font:14px/1.5 var(--mono);color:var(--fg);white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+#msgs .a pre i{font-style:normal;color:var(--acc)}
+#msgs .btns{display:flex;gap:10px;align-items:center;margin-top:12px}
+#msgs .a button{flex:1;min-height:44px;border-radius:10px;font:15px var(--sans);color:var(--fg);background:rgba(255,255,255,.07)}
+#msgs .a .yes{background:var(--acc);color:var(--ink)}
+#msgs .a .no{color:#f4b4ae}
+#msgs .a button:disabled{opacity:.35}
+#msgs .a .left{flex:none;min-width:38px;text-align:center;font:12px var(--mono);color:var(--dim);font-variant-numeric:tabular-nums}
+/* nothing said yet: what this is for, and a few things to ask */
+#aempty{align-self:center;margin:auto;padding:28px 20px;max-width:320px;text-align:center;color:#b9c6bf;font:15px/1.6 var(--sans)}
+#aempty .emark{width:44px;height:44px;margin:0 auto 14px;border:1px solid var(--line);border-radius:10px;
+  display:grid;place-items:center;font:15px var(--mono);color:var(--acc);background:rgba(255,255,255,.04)}
+#aempty p{margin:0}
+#aempty div{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:16px 0}
+#aempty button{min-height:36px;padding:0 12px;border-radius:18px;font:13px var(--sans);color:#b9c6bf;
+  border:1px solid var(--line);background:rgba(255,255,255,.04)}
+#aempty .sub{font:12.5px/1.55 var(--sans);color:#7d8b84}
+#cf{padding:8px 10px;padding-left:max(10px,env(safe-area-inset-left));
+  padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom));
+  border-top:1px solid var(--line)}
+#msg{flex:1;min-width:0;min-height:44px;font:16px var(--sans);color:var(--fg);padding:10px 12px;
+  border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.05);caret-color:var(--acc)}
+#msg::placeholder{color:rgba(232,235,233,.45)}
+#msg:focus{outline:none;border-color:rgba(63,178,111,.6)}
+#cf button{min-width:64px;min-height:44px;padding:0 14px;border-radius:10px;font:15px var(--sans);
+  color:var(--ink);background:var(--acc)}
+#cf button:disabled{opacity:.4}
+#cf #stop{display:none;min-width:56px;color:#f4b4ae;background:rgba(226,105,95,.12);border:1px solid rgba(226,105,95,.4)}
+#cf #stop.on{display:block}
 .hide{display:none!important}
 @media (prefers-reduced-motion:reduce){#title::after{animation:none}}
 @media (min-width:720px){#app{max-width:520px;margin:0 auto;
@@ -113,7 +195,13 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset
     <div id=empty class=hide><span class=emark>&gt;_</span>no terminal or CDP browser found<span class=sub>tap + to open one</span></div>
     <div id=files class=hide><div id=fbar><button id=fup type=button aria-label="parent folder">↑</button><span id=fpath></span>
       <a id=fopen target=_blank rel=noopener class=hide>new tab</a></div>
-      <ul id=flist></ul><iframe id=fview class=hide sandbox="allow-scripts allow-popups allow-forms" title="file"></iframe></div></div>
+      <ul id=flist></ul><iframe id=fview class=hide sandbox="allow-scripts allow-popups allow-forms" title="file"></iframe></div>
+    <div id=chat class=hide><div id=msgs aria-live=polite>
+        <div id=aempty class=hide><span class=emark>&gt;_</span><p>메시지를 보내면 이 데스크톱에서 처리합니다.</p>
+          <div><button type=button>홈 폴더 목록 보여줘</button><button type=button>git status 알려줘</button><button type=button>최근에 바뀐 파일 찾아줘</button></div>
+          <p class=sub>읽기 전용 명령은 바로 실행하고, 그 밖의 명령과 파일 변경은 실행 전에 확인합니다.</p></div>
+        <div id=typing class=hide aria-hidden=true>…</div></div>
+      <form id=cf><input id=msg maxlength=2000 enterkeyhint=send autocomplete=off spellcheck=false placeholder="메시지" aria-label=message><button id=stop type=button>중지</button><button id=send>전송</button></form></div>
   <footer>
     <div id=keys></div>
     <form id=f><span class=pfx aria-hidden=true>$</span><input id=txt autocomplete=off autocapitalize=off spellcheck=false placeholder="type, send = text + Enter"><button class=go>send</button></form>
@@ -138,7 +226,7 @@ function cell(){
 }
 function leave(id){if(id) navigator.sendBeacon('/leave',JSON.stringify({id}));}
 // views: one entry per window; terminal tabs fold into their window's view
-const GLYPH={files:'\u25a4',shell:'\u276f',term:'\u258c',page:'\u25ce',app:'\u25ec',screen:'\u25a9'};
+const GLYPH={files:'\u25a4',shell:'\u276f',term:'\u258c',page:'\u25ce',app:'\u25ec',screen:'\u25a9',agent:'\u2328'};
 function buildViews(){
   views=[];tabSel={};
   for(const c of cards){
@@ -179,7 +267,7 @@ function buildDesk(){
 }
 async function show(i){
   if(!views.length){$('title').textContent='Swiv';$('pos').textContent='';
-    for(const e of ['term','shot','tabs','desk']) $(e).classList.add('hide'); $('empty').classList.remove('hide');
+    for(const e of ['term','shot','tabs','desk','chat']) $(e).classList.add('hide'); $('empty').classList.remove('hide');
     document.querySelector('footer').classList.remove('hide'); return;}
   cur=(i+views.length)%views.length;
   const v=views[cur],c=activeCard();
@@ -192,12 +280,15 @@ async function show(i){
   $('shot').classList.toggle('hide',k!=='page'&&k!=='screen');
   $('files').classList.toggle('hide',k!=='files');
   $('desk').classList.toggle('hide',k!=='desk');
+  $('chat').classList.toggle('hide',k!=='agent');
   $('tabs').classList.toggle('hide',v.tabs.length<2);
-  $('del').classList.toggle('dim',k==='files'||k==='screen'||k==='app'||k==='desk');
-  document.querySelector('footer').classList.toggle('hide',k==='files'||k==='desk'||k==='app');
+  $('del').classList.toggle('dim',k==='files'||k==='screen'||k==='app'||k==='desk'||k==='agent');
+  document.querySelector('footer').classList.toggle('hide',k==='files'||k==='desk'||k==='app'||k==='agent');
   clearTimeout(timer);
   if(k==='desk'){openId=null;openTab=null;buildDesk();return;}
   if(k==='files'){openId=null;openTab=null;if(!$('flist').childElementCount) dir(fpath);return;}
+  // the chat card owns no window to size or restore: only its poll runs
+  if(k==='agent'){openId=null;openTab=null;aFirst=true;aPoll(++aTok);return;}
   if(v.tabs.length>1) renderTabs(v);
   const r=$('view').getBoundingClientRect();
   if(k==='term'||k==='shell'){
@@ -274,6 +365,7 @@ $('view').addEventListener('touchstart',e=>{const t=e.touches[0];t0={x:t.clientX
 $('view').addEventListener('touchend',e=>{
   if(!t0) return;
   const t=e.changedTouches[0],dx=t.clientX-t0.x,dy=t.clientY-t0.y,dt=Date.now()-t0.at,c=activeCard();t0=null;
+  if(aScrollable(e.target))return;
   if(Math.abs(dx)>60&&Math.abs(dx)>2*Math.abs(dy)&&dt<600){show(cur+(dx<0?1:-1));return;}
   if(!c||c.kind!=='page'&&c.kind!=='screen') return;
   const r=$('view').getBoundingClientRect(),
@@ -282,7 +374,7 @@ $('view').addEventListener('touchend',e=>{
   if(Math.abs(dx)<10&&Math.abs(dy)<10&&dt<300) send({type:'tap',...p});
   else if(Math.abs(dy)>Math.abs(dx)) send({type:'scroll',...p,dy:-dy*2});
 },{passive:true});
-document.addEventListener('keydown',e=>{if(e.target===$('txt'))return;if(e.key==='ArrowRight')show(cur+1);if(e.key==='ArrowLeft')show(cur-1);});
+document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='ArrowRight')show(cur+1);if(e.key==='ArrowLeft')show(cur-1);});
 $('title').onclick=()=>load();
 for(const [label,key] of KEYS){const b=document.createElement('button');b.type='button';b.textContent=label;
   b.onclick=()=>{const c=activeCard();if(c) send(c.kind==='term'||c.kind==='shell'?{key}:{type:'key',key});};$('keys').append(b);}
@@ -324,6 +416,204 @@ function closeFile(){
 }
 $('fup').onclick=()=>{if(!$('fview').classList.contains('hide')) closeFile();
   else if(fpath) dir(fpath.split('/').slice(0,-1).join('/'));};
+// agent chat card: one server session, read back by event idx (docs/agent-card.md).
+// The list is built once per page and kept across card switches; only the poll stops.
+// An answer is a document: the server renders its markdown block by block into a
+// tree of allowed nodes, and this builds the tree with textContent, so no HTML
+// from the model or a tool is ever parsed here.
+let aIdx=0,aOn=false,aTok=0,aState='idle',aFlow=0,aFail=0,aFirst=true,
+  aSeen=new Map(),aCard=new Map(),aBox=new Map(),aAsk=null,aDup=[],aErr=[];
+const aFmt=a=>typeof a==='string'?a:JSON.stringify(a,null,1)||'';
+const aSt={ok:'완료',blocked:'차단됨',denied:'거부됨',stopped:'중지됨'};
+const aGrade={approval:'승인 필요',blocked:'차단'};
+const aLive=g=>{const c=activeCard();return g===aTok&&!!c&&c.kind==='agent';};
+// a swipe sideways inside a code block or a table that can scroll scrolls it, not the cards
+const aScrollable=t=>{const s=t&&t.closest&&t.closest('.cb pre,.tw');return !!s&&s.scrollWidth>s.clientWidth;};
+const aTags={p:1,h1:1,h2:1,h3:1,h4:1,h5:1,h6:1,ul:1,ol:1,li:1,strong:1,em:1,del:1,blockquote:1,hr:1,br:1,
+  table:1,thead:1,tbody:1,tr:1,th:1,td:1,sup:1,code:1,span:1,pre:1,a:1};
+const aNear=()=>$('msgs').scrollHeight-$('msgs').scrollTop-$('msgs').clientHeight<80;
+function aKeep(was){if(was)$('msgs').scrollTop=$('msgs').scrollHeight;}  // follow the bottom only for one who is there
+function aPut(...els){
+  const was=aNear();
+  for(const el of els)$('msgs').insertBefore(el,$('typing'));
+  aKeep(was);$('aempty').classList.add('hide');
+}
+function aSay(cls,text){const d=document.createElement('div');d.className=cls;d.textContent=text;aPut(d);}
+function aTyping(){  // "…" until the text comes, and again when it stops coming
+  $('typing').classList.toggle('hide',aState!=='running'||Date.now()-aFlow<1200);
+  $('stop').classList.toggle('on',aState!=='idle');
+}
+// a node of the server's tree: only the tags and the attributes listed here
+function aNode(x){
+  if(typeof x==='string')return document.createTextNode(x);
+  if(!x||typeof x!=='object'||!aTags[x.t])return document.createDocumentFragment();
+  const href=x.a&&x.a.href||'',link=x.t==='a'&&/^https?:\/\//i.test(href);
+  const e=document.createElement(link?'a':x.t==='a'?'span':x.t);
+  if(link){e.href=href;e.target='_blank';e.rel='noopener noreferrer';}
+  if(x.a)for(const k of ['class','start','title'])if(x.a[k])e.setAttribute(k,x.a[k]);
+  for(const c of x.c||[])e.append(aNode(c));
+  return e;
+}
+// a code block: its language word and a copy button over the block
+function aCode(x){
+  const d=document.createElement('div'),h=document.createElement('div'),l=document.createElement('span'),
+    copy=document.createElement('button'),pre=document.createElement('pre');
+  d.className='cb';h.className='ch';l.textContent=x.lang||'';
+  copy.type='button';copy.textContent='복사';copy.hidden=!navigator.clipboard;  // a secure context only
+  copy.onclick=async()=>{
+    try{await navigator.clipboard.writeText(pre.textContent);copy.textContent='복사됨';
+      setTimeout(()=>copy.textContent='복사',1200);}catch(x){}
+  };
+  if(l.textContent||!copy.hidden){h.append(l,copy);d.append(h);}
+  pre.append(aNode(x));d.append(pre);
+  return d;
+}
+function aBlock(tree){
+  const f=document.createDocumentFragment();
+  for(const x of tree){
+    if(x&&x.t==='pre')f.append(aCode(x));
+    else if(x&&x.t==='table'){const w=document.createElement('div');w.className='tw';w.append(aNode(x));f.append(w);}
+    else f.append(aNode(x));
+  }
+  return f;
+}
+// block i of answer n: replaced in place while it is written, so what is done does not flicker
+function aUpsert(n,i,tree,final){
+  const was=aNear();let box=aBox.get(n);
+  if(!box){box=document.createElement('div');box.className='b';box._bl=new Map();aBox.set(n,box);aPut(box);}
+  const bl=document.createElement('div');bl.append(aBlock(tree));
+  const old=box._bl.get(i);
+  if(old)old.replaceWith(bl);else box.append(bl);
+  box._bl.set(i,bl);aFlow=Date.now();aKeep(was);
+  if(final!==undefined)box.setAttribute('aria-busy',final?'false':'true');
+}
+// a tool call: one quiet line; its arguments and its result fold away
+function aTool(callId,name){
+  let x=aSeen.get(callId);
+  if(x)return x;
+  const b=document.createElement('button'),pre=document.createElement('pre'),st=document.createElement('span'),
+    nm=document.createElement('b'),mk=document.createElement('span');
+  b.type='button';b.className='t';mk.textContent='\u25b8';nm.textContent=name||'tool';st.className='st';
+  b.append(mk,nm,st);pre.className='to';pre.hidden=true;
+  b.onclick=()=>{pre.hidden=!pre.hidden;mk.textContent=pre.hidden?'\u25b8':'\u25be';};
+  x={b,pre,st};aSeen.set(callId,x);
+  return x;
+}
+// a refused chat comes back twice, as the POST's error and as the event behind it: it shows once
+function aEvent(e){
+  const t=e.type;
+  if(t==='assistant'){
+    for(const b of e.blocks||[])aUpsert(e.n,b.i,b.tree,true);
+    if(!(e.blocks||[]).length&&e.text)aSay('b',e.text);
+  }else if(t==='user')aSay('u',e.text||'');
+  else if(t==='error'){
+    const i=aDup.indexOf(e.message);
+    if(i<0){aErr.push(e.message);aSay('e',e.message);}else aDup.splice(i,1);
+  }else if(t==='approval_request')aAskCard(e);
+  else if(t==='tool_call'||t==='tool_result'){
+    const x=aTool(e.call_id,e.name),ask=e.grade==='approval';
+    if(t==='tool_call'){
+      x.pre.textContent=aFmt(e.args);
+      x.st.textContent=aGrade[e.grade]||'실행 중';
+      x.st.className='st'+(e.grade==='blocked'?' bad':ask?' wait':'');
+      if(!ask)aPut(x.b,x.pre);  // one that needs the user is the approval card until it is answered
+    }else{
+      x.pre.textContent=[x.pre.textContent,e.result].filter(Boolean).join('\n\n');
+      x.st.textContent=aSt[e.status]||'완료';x.st.className='st'+(e.status&&e.status!=='ok'?' bad':'');
+      const c=aCard.get(e.call_id);
+      if(c){aCard.delete(e.call_id);c.remove();if(!x.b.parentNode)aPut(x.b,x.pre);}
+      if(aAsk&&aAsk.id===e.call_id)aAsk=null;
+    }
+  }
+}
+// the approval: what will run, in full, and the two answers
+function aAskCard(e){
+  const d=document.createElement('div'),s=document.createElement('small'),pre=document.createElement('pre'),
+    r=document.createElement('div'),yes=document.createElement('button'),no=document.createElement('button'),
+    left=document.createElement('span'),btns=[yes,no],cmd=e.args&&e.args.command,shell=e.name==='shell_run';
+  d.className='a';r.className='btns';left.className='left';
+  s.textContent=shell&&typeof cmd==='string'?'이 명령을 데스크톱에서 실행합니다. 실행 전에 확인이 필요합니다.'
+    :(e.name||'도구')+'를 실행하기 전에 확인이 필요합니다.';
+  if(shell&&typeof cmd==='string')for(const line of cmd.split('\n')){
+    const i=document.createElement('i');i.textContent='$ ';pre.append(i,document.createTextNode(line+'\n'));}
+  else pre.textContent=aFmt(e.args);
+  for(const [b,ok,path] of [[yes,true,'/agent/approve'],[no,false,'/agent/cancel']]){
+    b.type='button';b.className=ok?'yes':'no';b.textContent=ok?'실행':'거부';
+    b.onclick=async()=>{
+      for(const x of btns)x.disabled=true;left.textContent='';
+      try{await api(path,{call_id:e.call_id});}
+      catch(x){for(const y of btns)y.disabled=false;}
+    };
+  }
+  r.append(yes,no,left);d.append(s,pre,r);aPut(d);aCard.set(e.call_id,d);
+  aAsk={id:e.call_id,until:e.ts+e.timeout_sec,left,btns};
+}
+// history carries the user turns (the event log has none) and every answer's rendered blocks
+function aRestore(s){
+  for(const m of s.history||[]){
+    const calls=m.tool_calls||[],text=m.content||'';
+    if(calls.length)for(const c of calls)aEvent({type:'tool_call',call_id:c.id,name:c.function.name,args:c.function.arguments});
+    else if(m.role==='tool')aEvent({type:'tool_result',call_id:m.tool_call_id,result:text,
+      status:text.startsWith('denied')?'denied':text.startsWith('blocked')?'blocked':text.startsWith('stopped')?'stopped':'ok'});
+    else if(m.role==='assistant'){
+      if(m.blocks)for(const b of m.blocks)aUpsert(m.n,b.i,b.tree,true);
+      else if(text)aSay('b',text);
+    }else if(text)aSay('u',text);
+  }
+  aIdx=s.idx||0;aState=s.state||'idle';
+}
+// back on the card during a wait: that request sits behind the cursor, so it is looked up
+async function aPending(){
+  for(let n=8;n<=aIdx+8;n*=4){
+    const ev=(await(await api('/agent/poll?since='+Math.max(0,aIdx-n))).json()).events||[],
+      p=ev.filter(e=>e.type==='approval_request').pop();
+    if(p)return ev.some(e=>e.type==='tool_result'&&e.call_id===p.call_id)?null:p;
+    if(aIdx<=n)return null;
+  }
+}
+async function aPoll(g){
+  if(!aLive(g))return;
+  try{
+    if(!aOn){  // first look: the conversation so far, then on from its last event
+      const s=await(await api('/agent/session')).json();
+      if(!aLive(g))return;
+      $('msgs').replaceChildren($('aempty'),$('typing'));
+      aSeen.clear();aCard.clear();aBox.clear();aAsk=null;aFlow=0;
+      aRestore(s);
+      $('aempty').classList.toggle('hide',!!(s.history||[]).length);
+      aOn=true;
+      if(s.state==='waiting'){const p=await aPending();if(!aLive(g))return;if(p)aAskCard(p);}
+    }
+    const full=aFirst?'&full=1':'';aFirst=false;  // just (back) on the card: every block of the text being written
+    // idle: every two seconds; otherwise the server holds the request until something changes
+    const d=await(await api('/agent/poll?since='+aIdx+full+(aState==='idle'?'':'&wait=25'))).json();
+    if(!aLive(g))return;  // a newer poll owns the list: nothing rendered, the cursor stays
+    for(const e of d.events||[])aEvent(e);
+    for(const b of d.md||[])aUpsert(b.n,b.i,b.tree,b.final);
+    aIdx=d.idx||aIdx;aState=d.state||aState;aFail=0;
+  }catch(e){aFail=Date.now();}
+  aTyping();
+  if(aAsk&&!aAsk.btns[0].disabled)aAsk.left.textContent=Math.max(0,Math.ceil(aAsk.until-Date.now()/1000))+'s';
+  if(aLive(g))timer=setTimeout(()=>aPoll(g),aState==='idle'?2000:Date.now()-aFail<3000?1000:0);
+}
+function aKick(){clearTimeout(timer);aPoll(++aTok);}
+// composer: the user bubble is local (the event log has no user events), the answer streams in
+$('cf').onsubmit=async e=>{
+  e.preventDefault();
+  const text=$('msg').value,b=$('send');
+  if(!text.trim()||b.disabled)return;
+  b.disabled=true;aErr=[];
+  let d;
+  try{d=await(await api('/agent/chat',{text})).json();}catch(x){}
+  b.disabled=false;
+  if(!d)return;  // the request itself failed: the text stays for another try
+  if(d.ok){$('msg').value='';aSay('u',text);aState='running';aFlow=Date.now();aTyping();aKick();}
+  else if(!aErr.includes(d.error)){aSay('e',d.error||'요청을 받지 못했습니다');aDup.push(d.error);}
+};
+$('stop').onclick=async()=>{await api('/agent/stop',{});aKick();};  // what is shown stays
+for(const b of [$('send'),$('stop')])b.onmousedown=e=>e.preventDefault();  // a tap must not close the keyboard
+for(const b of $('aempty').querySelectorAll('button'))  // a suggested first request
+  b.onclick=()=>{$('msg').value=b.textContent;$('cf').requestSubmit();};
 $('add').onclick=()=>$('menu').classList.toggle('hide');
 for(const b of $('menu').querySelectorAll('button')) b.onclick=async()=>{
   $('menu').classList.add('hide');
@@ -340,7 +630,7 @@ for(const b of $('menu').querySelectorAll('button')) b.onclick=async()=>{
 };
 $('del').onclick=async()=>{
   const c=activeCard();
-  if(!c||['files','screen','app','desk'].includes(c.kind)||!confirm(`close "${c.title}"?`))return;
+  if(!c||['files','screen','app','desk','agent'].includes(c.kind)||!confirm(`close "${c.title}"?`))return;
   clearTimeout(timer);openId=null;openTab=null;
   await api('/close',{id:c.id});
   await new Promise(z=>setTimeout(z,800));
@@ -348,7 +638,7 @@ $('del').onclick=async()=>{
   show(Math.min(cur,views.length-1));
 };
 addEventListener('pagehide',()=>leave(openTab));
-document.addEventListener('visibilitychange',()=>{if(document.hidden){leave(openTab);openId=null;openTab=null;clearTimeout(timer);}else load();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){leave(openTab);openId=null;openTab=null;clearTimeout(timer);aTok++;}else load();});
 let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>show(cur),300);});
 if('serviceWorker' in navigator&&isSecureContext)navigator.serviceWorker.register('/sw.js');
 applyTheme().finally(()=>load());

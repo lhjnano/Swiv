@@ -30,5 +30,55 @@
   "login_window_min": 15,
   "login_lockout_min": 10,
   "allowed_countries": [],
-  "wallpaper_width": 1440
+  "wallpaper_width": 1440,
+  "agent": {
+    "enabled": false,
+    "base_url": "",
+    "api_key": "",
+    "model": "",
+    "max_tokens": 2048,
+    "temperature": 0.3,
+    "allow_commands": [
+      "ls",
+      "cat",
+      "head",
+      "tail",
+      "grep",
+      "find",
+      "df",
+      "du",
+      "ps",
+      "uname",
+      "uptime",
+      "pwd",
+      "which",
+      "git status",
+      "git log",
+      "git diff",
+      "git show"
+    ],
+    "block_commands": [
+      "sudo",
+      "su",
+      "mkfs",
+      "dd",
+      "shutdown",
+      "reboot",
+      "poweroff",
+      "systemctl",
+      "rm",
+      "chmod",
+      "chown",
+      "mv",
+      "kill"
+    ],
+    "approval_timeout_sec": 120,
+    "shell_timeout_sec": 60,
+    "coach": {
+      "enabled": false,
+      "nodes_path": "~/.cache/opencode-usage-coach/shared/nodes.ndjson",
+      "rules_path": "~/.cache/opencode-usage-coach/projects/d75b58a64b6c/rules.md",
+      "max_chars": 6000
+    }
+  }
 }

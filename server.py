@@ -1,5 +1,6 @@
 # swiv: phone view of desktop terminals (AT-SPI) and CDP browser pages as swipe cards.
 # endpoints: /login, / (page.html), /cards, /open, /leave, /term, /shot, /input, /new, /close
+# and /agent/* (the chat card, docs/agent-card.md)
 # setup: server.py --set-password  (writes port + scrypt hash to the config file)
 import atexit
 import getpass
@@ -17,6 +18,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import agent
 import apps
 import auth
 import cards
@@ -33,6 +35,8 @@ MAX_INPUT = 2000         # characters typed into a terminal per request
 LOGIN_FAIL_DELAY = 1     # seconds held after a wrong password
 TERM_COLS, TERM_ROWS = (20, 300), (5, 200)
 PAGE_W, PAGE_H, PAGE_DPR = (200, 2000), (200, 3000), (1, 3)
+AGENT_HISTORY = 200     # messages the chat card gets back when the phone returns to it
+AGENT_WAIT_MAX = 30     # seconds a long poll is held at most
 ICON_CACHE = "private, max-age=86400"
 WALLPAPER_CACHE, FONT_CACHE = "private, max-age=3600", "private, max-age=86400"
 VERSION = "0.1.0"
@@ -42,11 +46,51 @@ SESSIONS = {}  # token -> expiry epoch; in memory, so a restart logs everyone ou
 FTOKENS = {}  # file token -> expiry; sandboxed documents cannot send the cookie
 SESSION_FTOK = {}  # session token -> its file token
 # \Z, not $: $ would also accept a trailing newline
-CARD_RE = re.compile(r"^(t0x[0-9a-fA-F]+\.\d+|t\d+\.\d+|p\d+\.[A-Fa-f0-9]{16,64}|s\d{1,2}|sh\d{1,4}|a\d{1,10}|desk)\Z")
+CARD_RE = re.compile(r"^(t0x[0-9a-fA-F]+\.\d+|t\d+\.\d+|p\d+\.[A-Fa-f0-9]{16,64}|s\d{1,2}|sh\d{1,4}|a\d{1,10}|desk|agent)\Z")
 
 
 def _clamp(v, lo_hi):
     return min(max(v, lo_hi[0]), lo_hi[1])
+
+
+def _agent_on(cfg):
+    """cfg["agent"]["enabled"], the switch for the chat card and the /agent/*
+    endpoints. A config without a well formed agent object has them off."""
+    return bool(isinstance(cfg.get("agent"), dict) and cfg["agent"].get("enabled"))
+
+
+def _agent_chat(session, text):
+    """Start a turn with `text`, cut to MAX_INPUT like terminal input. {"ok":
+    True}, or {"ok": False, "error": reason} when the session refuses it: a
+    turn is running or waiting, or the text is blank."""
+    with session.lock:  # so the error event read back is the refusal's own
+        mark = session.events[-1]["idx"] if session.events else 0
+        ok = session.start_turn(text[:MAX_INPUT] if isinstance(text, str) else "")
+        reason = [e["message"] for e in session.events_since(mark) if e["type"] == "error"]
+    return {"ok": True} if ok else {"ok": False, "error": reason[0]}
+
+
+def _agent_view(session, since=None, history=0, wait=0, full=False):
+    """The session as the /agent GETs answer it: "state" and "idx", the idx of
+    the last event (0 until there is one), plus what is asked for. `since`
+    adds "events", those after that idx, and "md", the answer blocks rendered
+    since the last poll (docs/agent-card.md); `history` adds that many of the
+    latest messages, each answer with its rendered blocks. `wait` holds the
+    answer until something changes or that long has passed (a long poll).
+    One read under the session's lock, so events and idx belong together and
+    a phone that polls on from idx skips no event."""
+    if wait:
+        session.wait_events(since, min(wait, AGENT_WAIT_MAX))
+    with session.lock:
+        view = {"state": session.state, "idx": session.events[-1]["idx"] if session.events else 0}
+        if since is not None:
+            view["events"] = session.events_view(since)
+            md = session.md_changes(full)
+            if md:
+                view["md"] = md
+        if history:
+            view["history"] = session.history_view(history)
+        return view
 
 
 def hash_password(password, salt):
@@ -251,6 +295,18 @@ class H(BaseHTTPRequestHandler):
             if not ok:
                 return self._send(503, "text/plain", b"no chrome/chromium found; set chrome_bin in config")
             return self._json({"ok": True})
+        if path.startswith("/agent/"):
+            if not _agent_on(self.cfg):
+                return self._send(404, "text/plain", b"agent card disabled")
+            if path == "/agent/chat":
+                return self._json(_agent_chat(agent.get_session(), body.get("text")))
+            if path == "/agent/approve":
+                return self._json({"ok": agent.get_session().approve(body.get("call_id"))})
+            if path == "/agent/cancel":  # refuse the approval being waited for
+                return self._json({"ok": agent.get_session().deny(body.get("call_id"))})
+            if path == "/agent/stop":  # end the turn: what is shown stays, an approval counts as refused
+                return self._json({"ok": agent.get_session().stop()})
+            return self._send(404, "text/plain", b"not found")
         cid = self._card(body.get("id"))
         if cid is None:
             return
@@ -349,6 +405,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, "text/html", f.read())
         if path == "/cards":
             head = [{"kind": "files", "id": "files", "title": "files"}]
+            if _agent_on(self.cfg):
+                head.insert(0, {"kind": "agent", "id": "agent", "title": "agent"})
             if self.cfg.get("desk_card"):
                 head.insert(0, {"kind": "desk", "id": "desk", "title": "desktop"})
             tail = apps.cards_list(self.cfg) if self.cfg.get("app_cards") else []
@@ -372,6 +430,22 @@ class H(BaseHTTPRequestHandler):
             if data is None:
                 return self._send(404, "text/plain", b"no such folder")
             return self._json({**data, "ftok": SESSION_FTOK.get(token, "")})
+        if path.startswith("/agent/"):
+            if not _agent_on(self.cfg):
+                return self._send(404, "text/plain", b"agent card disabled")
+            if path == "/agent/poll":
+                # no or a bad cursor reads from the start (events_since); a running
+                # turn is waited for (wait), a phone just back gets the whole draft (full)
+                form = urllib.parse.parse_qs(query)
+                try:
+                    wait = max(0.0, float(form.get("wait", ["0"])[0]))
+                except ValueError:
+                    wait = 0
+                return self._json(_agent_view(agent.get_session(), since=form.get("since", [""])[0],
+                                              wait=wait, full=form.get("full", ["0"])[0] == "1"))
+            if path == "/agent/session":  # the conversation for a phone back on the card
+                return self._json(_agent_view(agent.get_session(), history=AGENT_HISTORY))
+            return self._send(404, "text/plain", b"not found")
         cid = self._card(urllib.parse.parse_qs(query).get("id", [""])[0])
         if cid is None:
             return

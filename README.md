@@ -72,6 +72,7 @@ xdotool, wmctrl, xprop, xclip, ffmpeg, fontconfig (fc-match), gnome-terminal
 - [Commands and configuration](docs/configuration.md)
 - [HTTPS and the installable app](docs/https.md)
 - [Usage](docs/usage.md): gestures and buttons
+- [Agent chat card](docs/agent-card.md): design of the resident bot assistant
 - [Security](docs/security.md): login, throttling, sandbox, network
 - [Troubleshooting](docs/troubleshooting.md), uninstall
 - [Development](docs/development.md): layout, tests, CI
