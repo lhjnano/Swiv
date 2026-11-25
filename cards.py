@@ -57,7 +57,10 @@ def _cdp(port, path, method="GET", timeout=CDP_TIMEOUT):
 
 
 def _xdo(*args):
-    return subprocess.run(["xdotool", *args], capture_output=True, text=True)
+    r = subprocess.run(["xdotool", *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise OSError("xdotool %s: %s" % (" ".join(args), r.stderr.strip()[:120]))
+    return r
 
 
 def _find(node, role, depth=0, out=None):
@@ -251,6 +254,8 @@ def term_text(cid):
 
 
 def term_input(cid, text="", key=""):
+    """Type into a terminal tab. OSError says why it could not (no xdotool,
+    no clipboard, window gone); False is a tab the registry never had."""
     with LOCK:
         t = _term(cid)
         if t is None:
@@ -307,7 +312,9 @@ def _paste(text):
     # xdotool type garbles text under ibus/hangul; paste via clipboard, then restore it
     clip = ["xclip", "-selection", "clipboard"]
     old = subprocess.run([*clip, "-o"], capture_output=True).stdout
-    subprocess.run(clip, input=text.encode())
+    put = subprocess.run(clip, input=text.encode())
+    if put.returncode != 0:
+        raise OSError("xclip: clipboard copy failed (is xclip installed?)")
     _xdo("key", "--clearmodifiers", "ctrl+shift+v")
     time.sleep(PASTE_DELAY)
     if old:

@@ -1462,12 +1462,20 @@ class DesktopTools(FileTools):
         rows = [{"kind": "term", "id": "t0x1234.0", "title": "~: bash"},
                 {"kind": "page", "id": self.PAGE, "title": "Example "},
                 {"kind": "shell", "id": "sh1", "title": "shell"}]
-        with mock.patch.object(agent.cards, "list_cards", return_value=rows) as listing:
+        screen = [["ls -la\n$ ", None, None]]
+        with mock.patch.object(agent.cards, "list_cards", return_value=rows) as listing, \
+                mock.patch.object(agent.cards, "term_text", return_value=screen):
             self.assertEqual(self.tool("cards_list", {}),
-                             "term  t0x1234.0  ~: bash\npage  %s  Example\nshell  sh1  shell" % self.PAGE)
+                             "term  t0x1234.0  ~: bash  | 마지막 줄: $\npage  %s  Example\nshell  sh1  shell" % self.PAGE)
             listing.assert_called_once_with(config.DEFAULTS)
+            # brief skips the text
+            self.assertNotIn("|", self.tool("cards_list", {"brief": True}))
+        with mock.patch.object(agent.cards, "list_cards", return_value=rows) as listing, \
+                mock.patch.object(agent.cards, "term_text", side_effect=RuntimeError("no bus")):
+            # a terminal that cannot be read still lists
+            self.assertIn("~: bash", self.tool("cards_list", {}))
         with mock.patch.object(agent.cards, "list_cards", return_value=[]):
-            self.assertEqual(self.tool("cards_list", {}), "열린 카드가 없다")
+            self.assertIn("열린 카드가 없다", self.tool("cards_list", {}))
         with mock.patch.object(agent.cards, "list_cards", side_effect=RuntimeError("no bus")):
             self.assertEqual(self.tool("cards_list", {}), "error: RuntimeError: no bus")
 
@@ -1647,8 +1655,18 @@ class DesktopTools(FileTools):
             self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "text": "ls -la"}),
                              '넣었다: {"text": "ls -la", "key": null}')
         with mock.patch.object(agent.cards, "term_input", return_value=False):
-            self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}),
-                             "error: 터미널에 닿지 못했다 (화면이 잠겨 있으면 안 될 수 있다)")
+            # this machine has no AT-SPI: the reason says so
+            with mock.patch.object(agent.cards, "Atspi", None):
+                self.assertIn("AT-SPI", self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}))
+            # a machine that has AT-SPI but a tab that is gone
+            import shutil as _shutil
+            with mock.patch.object(agent.cards, "Atspi", object()), \
+                    mock.patch.object(_shutil, "which", return_value="/usr/bin/xdotool"):
+                self.assertIn("찾지 못했다", self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}))
+            # a machine that has AT-SPI but no xdotool
+            with mock.patch.object(agent.cards, "Atspi", object()), \
+                    mock.patch.object(agent.shutil, "which", return_value=None):
+                self.assertIn("xdotool", self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}))
         with mock.patch.object(agent.cards, "term_input", side_effect=RuntimeError("no bus")):
             self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}),
                              "error: RuntimeError: no bus")

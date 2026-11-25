@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -37,7 +38,7 @@ BASE_PROMPT = """당신은 이 데스크톱의 개인 비서다. 사용자가 �
 도구 사용 규칙:
 - 파일은 files_list로 찾고 files_read로 읽는다. 명령은 shell_run으로 실행하고, 폴더를 바꿀 때는 "cd ... &&" 대신 shell_run의 cwd 인자를 쓴다.
 - 화면과 탭은 cards_list로 찾는다. 페이지의 글은 browser_read로, 터미널의 글은 term_read로 읽는다.
-- 탭을 조작할 때는 먼저 읽어 상태를 보고, 한 가지를 조작한 뒤 다시 읽어 확인한다(browser_act, term_write). 조작이 안 먹으면 같은 방법을 되풀이하지 않고 다른 방식을 시도한다.
+- 탭을 조작할 때는 먼저 읽어 상태를 보고, 한 가지를 조작한 뒤 다시 읽어 확인한다(browser_act, term_write). 터미널에 쓰기 전에 term_read로 그 탭이 무엇을 돌리고 있는지 반드시 본다. 조작이 안 먹으면 같은 방법을 되풀이하지 않고 다른 방식을 시도한다.
 - 새 탭(browser_open), 탭 조작(browser_act, term_write), 파일 쓰기(files_write)는 사용자가 폰에서 승인해야 한다.
 - shell_run은 읽기 전용 명령(ls, cat, grep, find, git status, git log, git diff, git show 따위)만 바로 실행한다. 그 밖의 명령은 사용자가 폰에서 승인해야 하고, 위험한 명령은 차단된다.
 - "denied by user or timeout" 또는 "blocked by policy"가 돌아오면 그 일은 하지 못한 것으로 간주하고 사용자에게 그대로 알린다. 다른 명령이나 도구로 우회해 같은 일을 다시 시도하지 않는다.
@@ -544,9 +545,23 @@ def _tool_cards_list(args, cfg_agent):
     except Exception as e:  # a listing that cannot be made is reported, not fatal
         return "error: %s: %s" % (type(e).__name__, e)
     if not rows:
-        return "열린 카드가 없다"
-    return "\n".join("%s  %s  %s" % (c.get("kind"), c.get("id"), str(c.get("title") or "").strip())
-                     for c in rows)
+        return ("열린 카드가 없다. 브라우저 탭은 browser_open으로 열 수 있다. "
+                "터미널 카드는 gnome-terminal과 AT-SPI가 있는 데스크톱에서만 보인다.")
+    out = []
+    for c in rows:
+        line = "%s  %s  %s" % (c.get("kind"), c.get("id"), str(c.get("title") or "").strip())
+        if c.get("kind") == "term" and not args.get("brief"):
+            try:  # the last line of the screen: what is running there
+                segs = cards.term_text(c.get("id"))
+                if segs:
+                    tail = "".join(seg[0] for seg in segs if seg and isinstance(seg[0], str)).rstrip()
+                    lines = [line for line in tail.split("\n") if line.strip()]
+                    if lines:
+                        line += "  | 마지막 줄: %s" % lines[-1].strip()[:80]
+            except Exception:
+                pass  # a terminal that cannot be read still lists
+        out.append(line)
+    return "\n".join(out)
 
 
 def _tool_browser_open(args, cfg_agent):
@@ -677,10 +692,16 @@ def _tool_term_write(args, cfg_agent):
         return "error: key는 %s 중 하나다" % ", ".join(cards.XKEYS)
     try:
         ok = cards.term_input(cid, text or "", key or "")
+    except OSError as e:  # xdotool or xclip failed: the reason says which
+        return "error: %s" % e
     except Exception as e:  # no accessibility bus, no X11: reported, not fatal
         return "error: %s: %s" % (type(e).__name__, e)
     if not ok:
-        return "error: 터미널에 닿지 못했다 (화면이 잠겨 있으면 안 될 수 있다)"
+        if cards.Atspi is None:
+            return "error: 이 머신에 AT-SPI가 없다 (터미널 카드는 데스크톱에서만 된다)"
+        if not shutil.which("xdotool"):
+            return "error: xdotool가 없다 (make deps가 설치한다)"
+        return "error: 그 터미널 탭을 찾지 못했다. cards_list로 현재 있는 id를 확인한다"
     return "넣었다: " + json.dumps({"text": text, "key": key}, ensure_ascii=False)
 
 
@@ -760,8 +781,14 @@ TOOLS = {
     },
     "cards_list": {
         "description": "폰이 카드로 보는 것들의 목록(종류, id, 제목): 터미널 탭, 브라우저 탭, 셸, "
-                       "앱 창. 다른 도구에 넘길 id를 여기서 찾는다. 읽기 전용.",
-        "parameters": {"type": "object", "properties": {}},
+                       "앱 창. 터미널은 마지막 줄도 같이 보인다. 다른 도구에 넘길 id를 여기서 찾는다. "
+                       "읽기 전용. brief를 true로 하면 마지막 줄을 생략한다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "brief": {"type": "boolean", "description": "마지막 줄 생략 (기본 false)"}
+            }
+        },
         "grade": "readonly",
         "run": _tool_cards_list,
     },
