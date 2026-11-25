@@ -1687,6 +1687,11 @@ class DesktopTools(FileTools):
             with mock.patch.object(agent.cards, "term_text") as read:
                 self.assertTrue(self.tool("term_read", {"id": bad}).startswith("error:"), repr(bad))
                 read.assert_not_called()
+        # a wrong id names the terminals that are actually there
+        with mock.patch.object(agent.cards, "list_cards", return_value=[
+                {"kind": "term", "id": "t0x1234.0", "title": "~: bash"}]):
+            err = self.tool("term_read", {"id": "nonsense"})
+            self.assertIn("~: bash", err)  # the model learns which id to use
 
 
 class DesktopApproval(TurnCase):

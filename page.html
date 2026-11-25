@@ -204,7 +204,8 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
           <div><button type=button>홈 폴더 목록 보여줘</button><button type=button>git status 알려줘</button><button type=button>최근에 바뀐 파일 찾아줘</button></div>
           <p class=sub>읽기 전용 명령은 바로 실행하고, 그 밖의 명령과 파일 변경은 실행 전에 확인합니다.<br>
             <code>/기억 &lt;규칙&gt;</code>으로 가르치고 <code>/교정 &lt;잘못&gt;</code>으로 고칠 수 있습니다.</p></div>
-        <div id=typing class=hide aria-hidden=true>…</div></div>
+        <div id=typing class=hide aria-hidden=true>
+        <span class=dots><i></i><i></i><i></i></span><span>생각 중…</span></div></div>
       <form id=cf><input id=msg maxlength=2000 enterkeyhint=send autocomplete=off spellcheck=false placeholder="메시지" aria-label=message><button id=stop type=button>중지</button><button id=send>전송</button></form></div>
   <footer>
     <div id=keys></div>
@@ -443,8 +444,9 @@ function aPut(...els){
   aKeep(was);$('aempty').classList.add('hide');
 }
 function aSay(cls,text){const d=document.createElement('div');d.className=cls;d.textContent=text;aPut(d);}
-function aTyping(){  // "…" until the text comes, and again when it stops coming
-  $('typing').classList.toggle('hide',aState!=='running'||Date.now()-aFlow<1200);
+function aTyping(){  // the dots while the model thinks, the label says so
+  const thinking=aState==='running'&&Date.now()-aFlow>1200;
+  $('typing').classList.toggle('hide',!thinking);
   $('stop').classList.toggle('on',aState!=='idle');
 }
 // a node of the server's tree: only the tags and the attributes listed here

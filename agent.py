@@ -514,6 +514,19 @@ def _card_id(value):
     return value if isinstance(value, str) and _CARD_ID.match(value) else None
 
 
+def _known_ids(kind=None):
+    """The card ids that exist right now, as a teaching string. A tool that
+    refuses a wrong id says which ones to pick from, so the model does not
+    have to guess again."""
+    try:
+        rows = cards.list_cards(_desktop_cfg())
+    except Exception:
+        return ""
+    ids = ["%s (%s)" % (c["id"], (c.get("title") or "")[:30]) for c in rows
+           if not kind or c.get("kind") == kind]
+    return "  있는 id: " + "; ".join(ids) if ids else ""
+
+
 def _desktop_cfg():
     """The swiv config: where Chrome's debugging port, profile and binary are."""
     try:
@@ -591,7 +604,7 @@ def _tool_browser_open(args, cfg_agent):
 def _tool_browser_read(args, cfg_agent):
     cid = _card_id(args.get("id"))
     if cid is None or not cid.startswith("p"):
-        return "error: 페이지 카드의 id가 필요하다 (cards_list로 찾는다)"
+        return "error: 페이지 카드의 id가 필요하다." + _known_ids("page")
     limit = int(max(200, min(_num(args.get("max_chars"), 8000), READ_MAX_BYTES)))
     value = cards.page_eval(cid, PAGE_READ % limit)
     try:
@@ -608,7 +621,7 @@ def _tool_browser_read(args, cfg_agent):
 def _tool_browser_act(args, cfg_agent):
     cid = _card_id(args.get("id"))
     if cid is None or not cid.startswith("p"):
-        return "error: 페이지 카드의 id가 필요하다 (cards_list로 찾는다)"
+        return "error: 페이지 카드의 id가 필요하다." + _known_ids("page")
     kind = args.get("type")
     selector, value = args.get("selector"), args.get("value")
     if kind in ("click", "fill"):
@@ -682,7 +695,7 @@ def _tool_files_write(args, cfg_agent):
 def _tool_term_write(args, cfg_agent):
     cid = _card_id(args.get("id"))
     if cid is None or not cid.startswith("t"):
-        return "error: 터미널 카드의 id가 필요하다 (cards_list로 찾는다)"
+        return "error: 터미널 카드의 id가 필요하다." + _known_ids("term")
     text, key = args.get("text"), args.get("key")
     if text is None and key is None:
         return "error: text나 key 중 하나는 필요하다"
@@ -708,7 +721,7 @@ def _tool_term_write(args, cfg_agent):
 def _tool_term_read(args, cfg_agent):
     cid = _card_id(args.get("id"))
     if cid is None or not cid.startswith("t"):
-        return "error: 터미널 카드의 id가 필요하다 (cards_list로 찾는다)"
+        return "error: 터미널 카드의 id가 필요하다." + _known_ids("term")
     try:
         segs = cards.term_text(cid)
     except Exception as e:  # no accessibility bus, no X11: reported, not fatal
