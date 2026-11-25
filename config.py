@@ -102,6 +102,12 @@ DEFAULTS = {
         # what the user taught with /rule and /fix, read into every prompt; the
         # coach rules below are read only
         "rules_path": os.path.expanduser(os.path.join(_XDG, "swiv", "agent-rules.md")),
+        # markdown files that teach the agent (browser and terminal tab control
+        # ship with it): read into every prompt, as written
+        "skills": {
+            "path": os.path.expanduser(os.path.join(_XDG, "swiv", "skills")),
+            "max_chars": 8000,
+        },
         # jobs the server starts by itself in the chat session, local time:
         # [{"name": "briefing", "at": "07:30", "days": [1, 2, 3, 4, 5], "text": "..."},
         #  {"name": "status", "every_min": 120, "text": "..."}]

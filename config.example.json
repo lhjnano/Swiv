@@ -93,6 +93,10 @@
     "daily_token_budget": 0,
     "rules_path": "~/.config/swiv/agent-rules.md",
     "schedule": [],
+    "skills": {
+      "path": "~/.config/swiv/skills",
+      "max_chars": 8000
+    },
     "coach": {
       "enabled": false,
       "nodes_path": "~/.cache/opencode-usage-coach/shared/nodes.ndjson",

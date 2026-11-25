@@ -20,7 +20,9 @@ takes the content and redraws it for the phone.
   while the desktop is locked.
 - Agent card (off by default): a chat with an assistant that runs on the
   desktop itself and acts on it through a few tools (shell commands, files,
-  browser tabs). Anything that changes something waits for a tap on the phone.
+  browser and terminal tabs, including typing into programs already running).
+  Anything that changes something waits for a tap on the phone. It follows
+  markdown skills you can edit (browser and terminal control ship with it).
 - The desktop wallpaper and the default terminal profile (colors, transparency,
   font) are mirrored.
 

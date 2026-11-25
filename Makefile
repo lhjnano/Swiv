@@ -8,6 +8,7 @@ PY := $(VENV)/bin/python
 CONFIG_HOME := $(or $(XDG_CONFIG_HOME),$(HOME)/.config)
 CONFIG := $(or $(SWIV_CONFIG),$(CONFIG_HOME)/swiv/config.json)
 UNIT := $(CONFIG_HOME)/systemd/user/swiv.service
+SKILLS := $(CONFIG_HOME)/swiv/skills
 
 # Debian/Ubuntu package names; see README for other distributions
 APT_PKGS := python3-venv python3-gi gir1.2-atspi-2.0 at-spi2-core libglib2.0-bin \
@@ -15,13 +16,14 @@ APT_PKGS := python3-venv python3-gi gir1.2-atspi-2.0 at-spi2-core libglib2.0-bin
 CMDS := python3 xdotool wmctrl xprop xclip ffmpeg fc-match gsettings gnome-terminal
 BROWSERS := google-chrome google-chrome-stable chromium chromium-browser
 
-.PHONY: help check deps venv config password a11y service install run start stop restart \
+.PHONY: help check deps venv config password a11y skills service install run start stop restart \
 	status logs test security uninstall clean
 
 help:
 	@echo "make deps       install system packages (apt, needs sudo)"
 	@echo "make install    check deps, create venv and config, enable accessibility, register user service"
 	@echo "make password   set or change the login password"
+	@echo "make skills     add the shipped agent skills (browser, terminal) if missing"
 	@echo "make start|stop|restart|status|logs   control the user service"
 	@echo "make run        run in the foreground (for debugging)"
 	@echo "make test       run the self tests"
@@ -59,6 +61,12 @@ config:
 	@if [ -f "$(CONFIG)" ]; then echo "keeping $(CONFIG)"; \
 	else install -m 600 config.example.json "$(CONFIG)"; echo "created $(CONFIG)"; fi
 
+skills:
+	@mkdir -p "$(SKILLS)"
+	@for f in skills/*.md; do b=$$(basename $$f); [ -e "$(SKILLS)/$$b" ] || \
+		{ install -m 644 "$$f" "$(SKILLS)/"; echo "skill added: $$b"; }; done
+	@echo "skills in $(SKILLS) (edit freely; swiv never overwrites)"
+
 password: venv
 	@SWIV_CONFIG="$(CONFIG)" $(PY) server.py --set-password
 
@@ -74,7 +82,7 @@ service: venv
 	systemctl --user daemon-reload
 	systemctl --user enable swiv.service
 
-install: check venv config a11y service
+install: check venv config a11y skills service
 	@echo; echo "next: make password && make start"
 
 run: venv

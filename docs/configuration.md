@@ -8,6 +8,7 @@ make check      dependencies and PAM lockout module check
 make password   set the separate password (auth=password mode)
 make start | stop | restart | status | logs
 make run        run in the foreground (debugging)
+make skills     add the shipped agent skills if the folder has no such file
 make test       self tests
 make security   bandit (medium and above) and pip-audit
 make uninstall  remove the user service (config is kept)
@@ -81,6 +82,10 @@ full list is in `config.example.json`. Run `make restart` after changing it.
     use. A stream then asks the provider for its usage (`stream_options`)
   - `rules_path` (default `~/.config/swiv/agent-rules.md`): what was taught
     with `/rule` and `/fix`, read into every prompt
+  - `skills` (default `~/.config/swiv/skills`, 8000 characters): markdown
+    files the agent follows, read into every prompt as written. `make skills`
+    puts the shipped ones there once (browser and terminal tab control) and
+    never overwrites them
   - `schedule` (default `[]`): jobs the server starts by itself in the chat,
     at a local time or every so often, for example
     `[{"name": "briefing", "at": "07:30", "days": [1, 2, 3, 4, 5], "text": "..."}]`

@@ -67,6 +67,7 @@ def agent_cfg(**overrides):
     nowhere = os.path.join(tempfile.gettempdir(), "swiv-agent-nothing")  # no such folder
     cfg["coach"].update(rules_path=os.path.join(nowhere, "rules.md"),
                         nodes_path=os.path.join(nowhere, "nodes.ndjson"))
+    cfg["skills"] = {"path": os.path.join(nowhere, "skills"), "max_chars": 8000}
     cfg.update(overrides)
     return cfg
 
@@ -282,11 +283,39 @@ class ToolGate(unittest.TestCase):
         for name in ("cards_list", "browser_read", "term_read"):
             self.assertEqual(self.gates(name, {"id": "x"}), (False, False), name)
 
+    def test_skills_are_prompt_sections_under_their_titles(self):
+        folder = tempfile.mkdtemp(prefix="swiv-skills-")
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        write(os.path.join(folder, "b-browser.md"), "# 브라우저 탭\n\n보고, 조작, 확인.\n")
+        write(os.path.join(folder, "a-general.md"), "대답은 한국어다.\n")
+        write(os.path.join(folder, "notes.txt"), "not a skill")
+        cfg = agent_cfg(skills={"path": folder})
+        block = agent.skills_block(cfg)
+        self.assertIn("## 스킬 (skills 폴더의 파일 그대로: 지킬 지침이다)", block)
+        self.assertIn("### 스킬: 브라우저 탭\n보고, 조작, 확인.", block)
+        self.assertIn("### 스킬: a-general\n대답은 한국어다.", block)  # no # line: the file name
+        self.assertNotIn("not a skill", block)
+        self.assertLess(block.index("a-general"), block.index("브라우저 탭"))  # name order
+        prompt = agent.system_prompt(cfg, "질문")
+        self.assertTrue(prompt.startswith(agent.BASE_PROMPT))
+        self.assertIn("보고, 조작, 확인.", prompt)  # and so into the whole prompt
+        for empty in ({"path": "/no/such"}, None, {"path": ""}):
+            self.assertEqual(agent.skills_block(agent_cfg(skills=empty)), "", empty)
+
+    def test_skills_over_the_budget_are_cut_and_say_so(self):
+        folder = tempfile.mkdtemp(prefix="swiv-skills-")
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        write(os.path.join(folder, "big.md"), "# 큰 스킬\n" + "글" * 9000)
+        block = agent.skills_block(agent_cfg(skills={"path": folder, "max_chars": 300}))
+        self.assertLessEqual(len(block), 350)
+        self.assertIn("잘렸다", block)
+
     def test_what_changes_the_desktop_asks_first(self):
         # (denied, needs approval): a file written, a tab opened, a page driven
         for name, arguments in (("files_write", {"path": "a.md", "text": "x"}),
                                 ("browser_open", {"url": "https://example.com/"}),
-                                ("browser_act", {"id": "p9222." + "a" * 32, "type": "key", "key": "Enter"})):
+                                ("browser_act", {"id": "p9222." + "a" * 32, "type": "key", "key": "Enter"}),
+                                ("term_write", {"id": "t1234.1", "text": "q!"})):
             self.assertEqual(self.gates(name, arguments), (False, True), name)
 
     def test_the_shell_command_decides(self):
@@ -1599,6 +1628,31 @@ class DesktopTools(FileTools):
         self.assertEqual(self.tool("files_write", {"path": "locked/f", "text": "x"}), "error: Permission denied")
         self.assertEqual(os.listdir(locked), [])  # no half file left
 
+    def test_term_write_validates_before_it_touches_a_terminal(self):
+        with mock.patch.object(agent.cards, "term_input") as typed:
+            for arguments in ({"id": "t0x1234.1"},  # nothing to type
+                              {"id": "p9222." + "a" * 32, "text": "x"}, {"id": "sh1", "text": "x"},
+                              {"id": "desk", "text": "x"}, {"id": None, "key": "Enter"},
+                              {"id": "t0x1234.1", "text": ""}, {"id": "t0x1234.1", "text": "x" * 2001},
+                              {"id": "t0x1234.1", "key": "ctrl+c"}, {"id": "t0x1234.1", "key": 7},
+                              {"id": "t0x1234.1", "text": "ok", "key": "not-a-key"}):
+                self.assertTrue(self.tool("term_write", arguments).startswith("error:"), arguments)
+            typed.assert_not_called()
+        with mock.patch.object(agent.cards, "term_input", return_value=True) as typed:
+            self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "text": "q!", "key": "Enter"}),
+                             '넣었다: {"text": "q!", "key": "Enter"}')
+            typed.assert_called_once_with("t0x1234.1", "q!", "Enter")
+            self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "key": "C-c"}),
+                             '넣었다: {"text": null, "key": "C-c"}')
+            self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "text": "ls -la"}),
+                             '넣었다: {"text": "ls -la", "key": null}')
+        with mock.patch.object(agent.cards, "term_input", return_value=False):
+            self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}),
+                             "error: 터미널에 닿지 못했다 (화면이 잠겨 있으면 안 될 수 있다)")
+        with mock.patch.object(agent.cards, "term_input", side_effect=RuntimeError("no bus")):
+            self.assertEqual(self.tool("term_write", {"id": "t0x1234.1", "key": "Enter"}),
+                             "error: RuntimeError: no bus")
+
     def test_term_read_brings_the_screen_as_labelled_data(self):
         screen = [["ls  ", None, None], ["\n결과 ", None, None], ["\x1b[0m  ", None, None], ["\n\n", None, None]]
         with mock.patch.object(agent.cards, "term_text", return_value=screen) as read:
@@ -1642,6 +1696,19 @@ class DesktopApproval(TurnCase):
         events = self.wait_end(mark)
         self.assertTrue(os.path.exists(marker))
         self.assertEqual(of_type(events, "tool_call")[0]["grade"], "approval")
+        self.assertEqual(self.statuses(events), {"call_1": "ok"})
+
+    def test_term_write_waits_for_the_user(self):
+        with mock.patch.object(agent.cards, "term_input", return_value=True) as typed:
+            self.turn(reply(calls=[tool_call(1, "term_write",
+                                             {"id": "t0x1234.1", "text": "q!", "key": "Enter"})]), reply("나갔다"))
+            mark = self.start()
+            request = self.request(mark)
+            typed.assert_not_called()  # nothing before the answer
+            self.assertEqual(request["args"], {"id": "t0x1234.1", "text": "q!", "key": "Enter"})
+            self.session.approve()
+            events = self.wait_end(mark)
+        typed.assert_called_once_with("t0x1234.1", "q!", "Enter")
         self.assertEqual(self.statuses(events), {"call_1": "ok"})
 
     def test_browser_act_waits_for_the_user_and_a_refusal_touches_nothing(self):
