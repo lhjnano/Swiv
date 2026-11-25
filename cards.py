@@ -386,6 +386,10 @@ def page_input(cid, ev):
     s = _page(cid)
     if s is None:
         return False
+    return _page_send(s, ev)
+
+
+def _page_send(s, ev):
     kind = ev.get("type")
     if kind == "tap":
         x, y = float(ev["x"]), float(ev["y"])
@@ -403,6 +407,51 @@ def page_input(cid, ev):
         s.call("Input.dispatchKeyEvent", {"type": "keyDown", **base, **({"text": txt} if txt else {})})
         s.call("Input.dispatchKeyEvent", {"type": "keyUp", **base})
     return True
+
+
+# the agent's browser tools (agent.py): they reach a page without the phone's
+# session, so they never touch the emulation it carries
+
+
+def _own_session(cid):
+    port, target = cid[1:].split(".", 1)
+    return PageSession(int(port), target)
+
+
+_UNREACHABLE = (OSError, ValueError, TypeError, KeyError, StopIteration, websocket.WebSocketException)
+
+
+def page_eval(cid, expression):
+    """Run a script in a page over a connection of its own and return its value
+    (None when the page cannot be reached or the script returns nothing)."""
+    try:
+        s = _own_session(cid)
+    except _UNREACHABLE:
+        return None
+    try:
+        r = s.call("Runtime.evaluate", {"expression": expression, "returnByValue": True})
+    except _UNREACHABLE:
+        return None
+    finally:
+        s.close()
+    return (r or {}).get("result", {}).get("value")
+
+
+def page_act(cid, ev):
+    """Drive a page for something other than the phone: the events of page_input,
+    on the phone's session when it has the page open, else on one of its own."""
+    if _pages.get(cid):
+        return page_input(cid, ev)
+    try:
+        s = _own_session(cid)
+    except _UNREACHABLE:
+        return False
+    try:
+        return _page_send(s, ev)
+    except _UNREACHABLE:
+        return False
+    finally:
+        s.close()
 
 
 CHROMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser",

@@ -526,6 +526,19 @@ function aEvent(e){
     }
   }
 }
+// what a tool is about to do, as the user reads it: what it is for, then a "key: value" a line
+const aWhy={browser_open:'이 주소로 데스크톱의 Chrome에서 탭을 엽니다.',
+  files_write:'이 파일을 씁니다. 이미 있으면 덮어씁니다.',browser_act:'이 브라우저 탭을 조작합니다.'};
+function aArgs(e){
+  const out=[];
+  for(const [k,v] of Object.entries(e.args||{})){
+    if(v===undefined||v===null||v==='')continue;
+    if(k==='text'&&typeof v==='string'&&v.split('\n').length>12){  // a long text: its first lines
+      const lines=v.split('\n');out.push(k+': '+lines.slice(0,12).join('\n')+'\n… (+'+(lines.length-12)+'줄)');
+    }else out.push(k+': '+(typeof v==='string'?v:JSON.stringify(v)));
+  }
+  return out.join('\n');
+}
 // the approval: what will run, in full, and the two answers
 function aAskCard(e){
   const d=document.createElement('div'),s=document.createElement('small'),pre=document.createElement('pre'),
@@ -533,10 +546,10 @@ function aAskCard(e){
     left=document.createElement('span'),btns=[yes,no],cmd=e.args&&e.args.command,shell=e.name==='shell_run';
   d.className='a';r.className='btns';left.className='left';
   s.textContent=shell&&typeof cmd==='string'?'이 명령을 데스크톱에서 실행합니다. 실행 전에 확인이 필요합니다.'
-    :(e.name||'도구')+'를 실행하기 전에 확인이 필요합니다.';
+    :aWhy[e.name]||(e.name||'도구')+'를 실행하기 전에 확인이 필요합니다.';
   if(shell&&typeof cmd==='string')for(const line of cmd.split('\n')){
     const i=document.createElement('i');i.textContent='$ ';pre.append(i,document.createTextNode(line+'\n'));}
-  else pre.textContent=aFmt(e.args);
+  else pre.textContent=aArgs(e)||aFmt(e.args);
   for(const [b,ok,path] of [[yes,true,'/agent/approve'],[no,false,'/agent/cancel']]){
     b.type='button';b.className=ok?'yes':'no';b.textContent=ok?'실행':'거부';
     b.onclick=async()=>{
