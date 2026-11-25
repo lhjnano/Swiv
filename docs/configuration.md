@@ -60,5 +60,38 @@ full list is in `config.example.json`. Run `make restart` after changing it.
   for example `["KR"]`; empty disables the filter. Local networks always pass
 - `wallpaper_width` (default `1440`): the wallpaper is downscaled to this
   width in pixels before it is sent
+- `agent` (default: off): the agent chat card, [agent-card.md](agent-card.md).
+  An object with these keys:
+  - `enabled` (default `false`): show the card and its endpoints
+  - `base_url`, `api_key`, `model` (default empty): an OpenAI compatible
+    endpoint, for example `http://127.0.0.1:11434/v1` with `llama3` (ollama)
+    or `https://api.openai.com/v1` with `gpt-4o-mini`. The key stays in this
+    file and out of every log
+  - `max_tokens`, `temperature` (default `2048`, `0.3`)
+  - `allow_commands` (default ls, cat, head, tail, grep, find, df, du, ps,
+    uname, uptime, pwd, which, git status, git log, git diff, git show): run
+    at once, without a shell
+  - `block_commands` (default sudo, doas, pkexec, su, mkfs, fdisk, sfdisk,
+    parted, wipefs, shred, dd, shutdown, reboot, halt, poweroff, init,
+    systemctl, rm, chmod, chown, chattr, mv, kill, killall, pkill, crontab,
+    passwd, userdel, usermod): never asked, only refused; every `mkfs.*` goes
+    with `mkfs`
+  - `approval_timeout_sec`, `shell_timeout_sec` (default `120`, `60`)
+  - `daily_token_budget` (default `0`, no limit): model tokens a local day may
+    use. A stream then asks the provider for its usage (`stream_options`)
+  - `rules_path` (default `~/.config/swiv/agent-rules.md`): what was taught
+    with `/rule` and `/fix`, read into every prompt
+  - `schedule` (default `[]`): jobs the server starts by itself in the chat,
+    at a local time or every so often, for example
+    `[{"name": "briefing", "at": "07:30", "days": [1, 2, 3, 4, 5], "text": "..."}]`
+    or `{"name": "status", "every_min": 120, "text": "..."}`
+  - `coach`: `enabled` (default `false`), `nodes_path`, `rules_path`,
+    `max_chars` (default `6000`): knowledge from the opencode usage-coach
+    harness, read only
+
+`python3 agent.py --rules | --rule "<rule>" | --schedule | --once "<request>"`
+works at the command line on the same config: list or add rules, check the
+schedule, or run one request without a phone (what needs an approval is not
+done).
 
 Back to the [README](../README.md).

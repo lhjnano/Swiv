@@ -98,6 +98,14 @@ DEFAULTS = {
         ],
         "approval_timeout_sec": 120,
         "shell_timeout_sec": 60,
+        "daily_token_budget": 0,  # model tokens a local day may use (0: no limit)
+        # what the user taught with /rule and /fix, read into every prompt; the
+        # coach rules below are read only
+        "rules_path": os.path.expanduser(os.path.join(_XDG, "swiv", "agent-rules.md")),
+        # jobs the server starts by itself in the chat session, local time:
+        # [{"name": "briefing", "at": "07:30", "days": [1, 2, 3, 4, 5], "text": "..."},
+        #  {"name": "status", "every_min": 120, "text": "..."}]
+        "schedule": [],
         # knowledge layer (the coach section of docs/agent-card.md)
         "coach": {
             "enabled": False,

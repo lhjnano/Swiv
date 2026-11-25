@@ -119,6 +119,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
 #msgs .e{align-self:flex-start;max-width:88%;padding:9px 12px;border-radius:14px 14px 14px 4px;font:14px/1.5 var(--sans);
   background:rgba(226,105,95,.12);border:1px solid rgba(226,105,95,.4);color:#f4b4ae}
 #typing{align-self:flex-start;padding:4px 2px;font:15px/1 var(--mono);color:var(--dim)}
+#msgs .n{align-self:center;max-width:92%;padding:2px 12px;text-align:center;font:12.5px/1.5 var(--sans);color:var(--dim)}
 /* code: a language word and a copy button over the block */
 #msgs .cb{margin:10px 0;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.035)}
 #msgs .ch{display:flex;align-items:center;justify-content:space-between;min-height:36px;padding:0 6px 0 12px;
@@ -152,6 +153,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
 #msgs .a small{display:block;margin-bottom:8px;font:12.5px/1.45 var(--sans);color:var(--dim)}
 #msgs .a pre{margin:0;font:14px/1.5 var(--mono);color:var(--fg);white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
 #msgs .a pre i{font-style:normal;color:var(--acc)}
+#msgs .a .b{padding:0}
 #msgs .btns{display:flex;gap:10px;align-items:center;margin-top:12px}
 #msgs .a button{flex:1;min-height:44px;border-radius:10px;font:15px var(--sans);color:var(--fg);background:rgba(255,255,255,.07)}
 #msgs .a .yes{background:var(--acc);color:var(--ink)}
@@ -167,6 +169,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
 #aempty button{min-height:36px;padding:0 12px;border-radius:18px;font:13px var(--sans);color:#b9c6bf;
   border:1px solid var(--line);background:rgba(255,255,255,.04)}
 #aempty .sub{font:12.5px/1.55 var(--sans);color:#7d8b84}
+#aempty .sub code{font:12px var(--mono);color:#b9c6bf}
 #cf{padding:8px 10px;padding-left:max(10px,env(safe-area-inset-left));
   padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom));
   border-top:1px solid var(--line)}
@@ -199,7 +202,8 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
     <div id=chat class=hide><div id=msgs aria-live=polite>
         <div id=aempty class=hide><span class=emark>&gt;_</span><p>메시지를 보내면 이 데스크톱에서 처리합니다.</p>
           <div><button type=button>홈 폴더 목록 보여줘</button><button type=button>git status 알려줘</button><button type=button>최근에 바뀐 파일 찾아줘</button></div>
-          <p class=sub>읽기 전용 명령은 바로 실행하고, 그 밖의 명령과 파일 변경은 실행 전에 확인합니다.</p></div>
+          <p class=sub>읽기 전용 명령은 바로 실행하고, 그 밖의 명령과 파일 변경은 실행 전에 확인합니다.<br>
+            <code>/기억 &lt;규칙&gt;</code>으로 가르치고 <code>/교정 &lt;잘못&gt;</code>으로 고칠 수 있습니다.</p></div>
         <div id=typing class=hide aria-hidden=true>…</div></div>
       <form id=cf><input id=msg maxlength=2000 enterkeyhint=send autocomplete=off spellcheck=false placeholder="메시지" aria-label=message><button id=stop type=button>중지</button><button id=send>전송</button></form></div>
   <footer>
@@ -422,7 +426,7 @@ $('fup').onclick=()=>{if(!$('fview').classList.contains('hide')) closeFile();
 // tree of allowed nodes, and this builds the tree with textContent, so no HTML
 // from the model or a tool is ever parsed here.
 let aIdx=0,aOn=false,aTok=0,aState='idle',aFlow=0,aFail=0,aFirst=true,
-  aSeen=new Map(),aCard=new Map(),aBox=new Map(),aAsk=null,aDup=[],aErr=[];
+  aSeen=new Map(),aCard=new Map(),aBox=new Map(),aRule=new Map(),aAsk=null,aDup=[],aErr=[];
 const aFmt=a=>typeof a==='string'?a:JSON.stringify(a,null,1)||'';
 const aSt={ok:'완료',blocked:'차단됨',denied:'거부됨',stopped:'중지됨'};
 const aGrade={approval:'승인 필요',blocked:'차단'};
@@ -509,7 +513,9 @@ function aEvent(e){
   else if(t==='error'){
     const i=aDup.indexOf(e.message);
     if(i<0){aErr.push(e.message);aSay('e',e.message);}else aDup.splice(i,1);
-  }else if(t==='approval_request')aAskCard(e);
+  }else if(t==='notice')aSay('n',e.text||'');
+  else if(t==='rule_candidate')aRuleCard(e);
+  else if(t==='approval_request')aAskCard(e);
   else if(t==='tool_call'||t==='tool_result'){
     const x=aTool(e.call_id,e.name),ask=e.grade==='approval';
     if(t==='tool_call'){
@@ -538,6 +544,28 @@ function aArgs(e){
     }else out.push(k+': '+(typeof v==='string'?v:JSON.stringify(v)));
   }
   return out.join('\n');
+}
+// a rule the model drafted from a correction: kept only on the phone's word
+function aRuleCard(e){
+  if(aRule.has(e.id))return;
+  const d=document.createElement('div'),s=document.createElement('small'),pre=document.createElement('pre'),
+    r=document.createElement('div'),yes=document.createElement('button'),no=document.createElement('button'),btns=[yes,no];
+  d.className='a';r.className='btns';
+  s.textContent='이 규칙을 지키게 할까요? 저장하면 다음 요청부터 지킨다.';
+  if((e.blocks||[]).length){  // the draft is markdown: built as the answers are
+    const box=document.createElement('div');box.className='b';
+    for(const b of e.blocks){const bl=document.createElement('div');bl.append(aBlock(b.tree));box.append(bl);}
+    d.append(s,box);
+  }else{pre.textContent=e.text||'';d.append(s,pre);}
+  for(const [b,ok,word] of [[yes,true,'저장'],[no,false,'버림']]){
+    b.type='button';b.className=ok?'yes':'no';b.textContent=word;
+    b.onclick=async()=>{
+      for(const x of btns)x.disabled=true;
+      try{const res=await api('/agent/rule',{id:e.id,save:ok});if((await res.json()).ok)d.remove();else for(const x of btns)x.disabled=false;}
+      catch(x){for(const y of btns)y.disabled=false;}
+    };
+  }
+  r.append(yes,no);d.append(r);aPut(d);aRule.set(e.id,d);
 }
 // the approval: what will run, in full, and the two answers
 function aAskCard(e){
@@ -591,8 +619,9 @@ async function aPoll(g){
       const s=await(await api('/agent/session')).json();
       if(!aLive(g))return;
       $('msgs').replaceChildren($('aempty'),$('typing'));
-      aSeen.clear();aCard.clear();aBox.clear();aAsk=null;aFlow=0;
+      aSeen.clear();aCard.clear();aBox.clear();aRule.clear();aAsk=null;aFlow=0;
       aRestore(s);
+      for(const r of s.rules||[])aRuleCard(r);  // drafts still waiting
       $('aempty').classList.toggle('hide',!!(s.history||[]).length);
       aOn=true;
       if(s.state==='waiting'){const p=await aPending();if(!aLive(g))return;if(p)aAskCard(p);}

@@ -60,8 +60,10 @@ def write(path, text):
 
 
 def agent_cfg(**overrides):
-    """The default agent config as a private copy, for tests to change."""
+    """The default agent config as a private copy, for tests to change: no
+    rules of the user's own and nothing scheduled unless a test brings them."""
     cfg = copy.deepcopy(config.DEFAULTS["agent"])
+    cfg.update(rules_path="", schedule=[])
     cfg.update(overrides)
     return cfg
 
@@ -1058,7 +1060,8 @@ class AgentEndpoints(unittest.TestCase):
         addr = self.serve(enabled=False)
         for method, path in (("GET", "/agent/poll"), ("GET", "/agent/session"),
                              ("POST", "/agent/chat"), ("POST", "/agent/approve"),
-                             ("POST", "/agent/cancel"), ("POST", "/agent/stop")):
+                             ("POST", "/agent/cancel"), ("POST", "/agent/stop"),
+                             ("POST", "/agent/rule")):
             with self.subTest(path=path):
                 status, body = self.request(addr, method, path, {} if method == "POST" else None)
                 self.assertEqual((status, body), (404, "agent card disabled"))
@@ -1129,6 +1132,33 @@ class AgentEndpoints(unittest.TestCase):
         self.assertTrue(0.3 < took < 8, took)  # held, and let go by the answer, not by the timeout
         self.assertEqual([e["type"] for e in view["events"]], ["assistant", "turn_end"])
         self.assertEqual((view["events"][0]["n"], len(view["events"][0]["blocks"])), (0, 1))
+
+    def test_the_phone_decides_on_a_rule_draft(self):
+        addr = self.serve(enabled=True)
+        status, answer = self.request(addr, "POST", "/agent/rule", {"id": "r9", "save": True})
+        self.assertEqual((status, answer), (200, {"ok": False}))  # no such draft
+        path = os.path.join(tempfile.mkdtemp(prefix="swiv-agent-rule-"), "agent-rules.md")
+        self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+        rid = agent.get_session().propose_rule("**답은 짧게**", "교정")
+        _, view = self.request(addr, "GET", "/agent/session")
+        self.assertEqual([{k: v for k, v in r.items() if k != "blocks"} for r in view["rules"]],
+                         [{"id": rid, "text": "**답은 짧게**"}])  # shown again to a phone back on the card
+        self.assertEqual(view["rules"][0]["blocks"][0]["tree"][0]["c"][0]["t"], "strong")
+        _, view = self.request(addr, "GET", "/agent/poll?since=0")
+        self.assertEqual([e["type"] for e in view["events"]], ["rule_candidate"])
+        with mock.patch.object(agent, "_agent_cfg", return_value=agent_cfg(rules_path=path)):
+            status, answer = self.request(addr, "POST", "/agent/rule", {"id": rid, "save": True})
+        self.assertEqual((status, answer), (200, {"ok": True}))
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("**답은 짧게**", f.read())
+        _, view = self.request(addr, "GET", "/agent/poll?since=0")
+        self.assertEqual([e["type"] for e in view["events"]], ["rule_candidate", "assistant"])
+        self.assertNotIn("rules", view)  # nothing waits any more
+        rid = agent.get_session().propose_rule("**버릴 것**", "교정")
+        status, answer = self.request(addr, "POST", "/agent/rule", {"id": rid})  # no "save": dropped
+        self.assertEqual((status, answer), (200, {"ok": True}))
+        with open(path, encoding="utf-8") as f:
+            self.assertNotIn("버릴 것", f.read())
 
     def test_a_bad_wait_is_ignored(self):
         addr = self.serve(enabled=True)
@@ -1622,6 +1652,483 @@ class DesktopApproval(TurnCase):
             events = self.wait_end(mark)
         drive.assert_not_called()
         self.assertEqual(self.statuses(events), {"call_1": "denied"})
+
+
+# --- what the user taught: rules, and the day's budget, the journal, jobs -----
+
+
+class End(Exception):
+    """Ends a scheduler loop built for a test."""
+
+
+class OwnRules(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="swiv-agent-rules-")
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.path = os.path.join(self.dir, "rules", "agent-rules.md")
+        self.cfg = agent_cfg(rules_path=self.path)
+
+    def test_a_rule_in_plain_words_gets_its_first_line_for_a_title(self):
+        self.assertEqual(agent._rule_text("대답은 세 줄 안으로"), "**대답은 세 줄 안으로**")
+        self.assertEqual(agent._rule_text("파일을 지우기 전에 한 번 더 묻는다.\n정말 확실할 때만 바로 한다."),
+                         "**파일을 지우기 전에 한 번 더 묻는다.**\n\n정말 확실할 때만 바로 한다.")
+        self.assertEqual(agent._rule_text("**제목**\n본문"), "**제목**\n본문")
+
+    def test_a_heading_the_model_adds_goes_and_a_rule_is_bounded_and_clean(self):
+        self.assertEqual(agent._rule_text("## Rule (2026-11-25)\n**짧게 답한다**\n\n설명"),
+                         "**짧게 답한다**\n\n설명")
+        self.assertEqual(agent._rule_text("## Rule (x)\n\n"), "")
+        self.assertEqual(agent._rule_text(None), "")
+        self.assertLessEqual(len(agent._rule_text("**길다** " + "x" * 5000)), agent.RULE_MAX)
+        self.assertEqual(agent._rule_text("**깨끗하게**\x1b[0m\x00"), "**깨끗하게**")
+
+    def test_a_rule_is_stored_as_coach_reads_it(self):
+        stored = agent.add_rule(self.cfg, "답은 한국어로", "사용자가 채팅에서 정함")
+        self.assertEqual(stored, "**답은 한국어로**")
+        rules = agent.load_rules(self.cfg)
+        self.assertEqual([(r["title"], r["body"]) for r in rules],
+                         [("답은 한국어로", "**답은 한국어로**\n\nOrigin: 사용자가 채팅에서 정함")])  # its source stays with it
+        self.assertTrue(rules[0]["date"])
+        with open(self.path, encoding="utf-8") as f:
+            self.assertIn("Origin: 사용자가 채팅에서 정함", f.read())
+        agent.add_rule(self.cfg, "**짧게**\n세 줄 안에.", "x")
+        self.assertEqual([r["title"] for r in agent.load_rules(self.cfg)], ["답은 한국어로", "짧게"])
+        for bad in ("", "   ", None, "## Rule (x)"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                agent.add_rule(self.cfg, bad, "x")
+        with self.assertRaises(ValueError):
+            agent.add_rule(agent_cfg(rules_path=""), "x", "x")  # nowhere to put it
+
+    def test_the_rules_are_in_every_prompt_and_a_tilde_path_reads_the_same(self):
+        self.assertEqual(agent.system_prompt(self.cfg, "질문"), agent.BASE_PROMPT)  # none yet
+        agent.add_rule(self.cfg, "답은 한국어로", "x")
+        prompt = agent.system_prompt(self.cfg, "질문")
+        self.assertTrue(prompt.startswith(agent.BASE_PROMPT))
+        self.assertIn("## 사용자가 정한 규칙\n### 답은 한국어로 (", prompt)
+        with mock.patch.dict(os.environ, {"HOME": self.dir}):
+            self.assertEqual(agent.system_prompt(agent_cfg(rules_path="~/rules/agent-rules.md"), "질문"), prompt)
+
+    def test_the_users_rules_come_before_the_coach_block(self):
+        agent.add_rule(self.cfg, "**내 규칙**", "x")
+        harness = os.path.join(self.dir, "harness.md")
+        write(harness, "## Rule (2026-07-09)\n**하네스 규칙**\n\n몸통\n")
+        cfg = agent_cfg(rules_path=self.path, coach={"enabled": True, "rules_path": harness,
+                                                     "nodes_path": os.path.join(self.dir, "none")})
+        prompt = agent.system_prompt(cfg, "질문")
+        self.assertLess(prompt.index("### 내 규칙"), prompt.index("### 하네스 규칙"))
+        with open(self.path, encoding="utf-8") as f:
+            self.assertNotIn("하네스", f.read())  # the coach file is read, never written
+
+
+class RuleCommands(TurnCase):
+    def setUp(self):
+        super().setUp()
+        self.path = os.path.join(self.root, "agent-rules.md")
+        self.cfg["rules_path"] = self.path
+
+    def test_rule_stores_what_the_user_wrote_without_the_model(self):
+        with mock.patch.object(agent, "llm_chat", side_effect=AssertionError("the model was asked")):
+            events = self.wait_end(self.start("/기억 답은 세 줄 안으로"))
+        self.assertEqual(types(events), ["assistant", "turn_end"])
+        self.assertTrue(events[0]["text"].startswith("규칙으로 저장했다"))
+        self.assertIn("**답은 세 줄 안으로**", events[0]["text"])
+        self.assertEqual(events[-1]["reason"], "done")
+        self.assertEqual(agent.load_rules(self.cfg)[0]["title"], "답은 세 줄 안으로")
+        self.assertIn("답은 세 줄 안으로", agent.system_prompt(self.cfg, "다음 질문"))
+        self.assertEqual(self.session.history[0]["content"], "/기억 답은 세 줄 안으로")  # kept in the talk
+        self.assertEqual(self.session.state, "idle")
+
+    def test_the_english_alias_and_a_command_with_nothing_in_it(self):
+        self.assertEqual(self.wait_end(self.start("/rule **짧게**"))[-1]["reason"], "done")
+        self.assertEqual(agent.load_rules(self.cfg)[0]["title"], "짧게")
+        for text, words in (("/기억", "규칙을 적어"), ("/rule   ", "규칙을 적어"), ("/교정", "무엇이 잘못였는지")):
+            events = self.wait_end(self.start(text))
+            self.assertEqual(types(events), ["error", "turn_end"], text)
+            self.assertIn(words, events[0]["message"])
+            self.assertEqual(events[-1]["reason"], "error")
+        self.assertEqual(len(agent.load_rules(self.cfg)), 1)  # none of them stored anything
+
+    def test_a_word_that_only_starts_like_a_command_is_a_request(self):
+        self.turn(reply("평범한 답"))
+        events = self.wait_end(self.start("/기억하세요 오늘 할 일"))
+        self.assertEqual(types(events), ["assistant", "turn_end"])
+        self.assertEqual(agent.load_rules(self.cfg), [])
+
+    def test_a_correction_becomes_a_draft_that_waits_for_the_phone(self):
+        draft = "**파일을 지우기 전에 묻는다**\n삭제는 사용자가 말한 경우에만, 한 번 더 확인하고."
+
+        def model(cfg_agent, messages, tools, on_text=None):
+            self.assertEqual(tools, {})  # a correction drafts a rule; it runs nothing
+            self.assertEqual(messages[0], {"role": "system", "content": agent.RULE_PROMPT})
+            self.assertIn("교정: 왜 파일을 지웠어", messages[1]["content"])
+            self.assertIn("최근 요청: 파일 좀 정리해줘", messages[1]["content"])
+            self.assertIn("- 도구 files_write", messages[1]["content"])  # the failure before it
+            return {"text": "## Rule (2026-11-25)\n" + draft, "tool_calls": [], "usage": 120}
+
+        # what went wrong first: a write the user refused
+        self.turn(reply(calls=[tool_call(1, "files_write", {"path": "a.txt", "text": "x"})]), reply("지웠다"))
+        mark = self.start("파일 좀 정리해줘")
+        self.request(mark)
+        self.session.deny()
+        self.wait_end(mark)
+        agent.reset_usage()
+        self.addCleanup(agent.reset_usage)
+        with mock.patch.object(agent, "llm_chat", model):
+            events = self.wait_end(self.start("/교정 왜 파일을 지웠어"))
+        self.assertEqual(types(events), ["rule_candidate", "turn_end"])
+        self.assertEqual(events[0]["text"], draft)  # the heading the model added is gone
+        self.assertEqual([{k: v for k, v in r.items() if k != "blocks"} for r in self.session.rules_pending()],
+                         [{"id": "r1", "text": draft}])
+        # shown as the answers are: a tree to build, its title in bold
+        self.assertEqual([b["tree"][0]["t"] for b in events[0]["blocks"]], ["p"])
+        self.assertEqual(events[0]["blocks"][0]["tree"][0]["c"][0]["t"], "strong")
+        self.assertFalse(os.path.exists(self.path))  # a draft is no rule until the phone says so
+        self.assertNotIn("파일을 지우기 전에 묻는다", agent.system_prompt(self.cfg, "q"))
+        self.assertEqual(agent.budget_left(self.cfg), (0, 120))  # the drafting was counted all the same
+        self.assertTrue(self.session.drop_rule("r1"))
+        self.assertEqual(of_type(self.session.events, "notice")[-1]["text"], "규칙 후보를 버렸다")
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(self.session.rules_pending(), [])
+        self.assertIsNone(self.session.save_rule("r1"))  # dropped: nothing to save
+        self.assertFalse(self.session.drop_rule("r1"))
+        self.assertIsNone(self.session.save_rule(42))
+        self.assertFalse(self.session.drop_rule(None))
+
+    def test_the_phone_s_word_makes_the_draft_a_rule(self):
+        rid = self.session.propose_rule("**답은 짧게**\n두 줄.", "교정: 너무 길어")
+        candidate = of_type(self.session.events, "rule_candidate")[0]
+        self.assertEqual({k: v for k, v in candidate.items() if k != "blocks"},
+                         {"idx": 1, "type": "rule_candidate", "ts": mock.ANY, "id": "r1",
+                          "text": "**답은 짧게**\n두 줄."})
+        self.assertEqual(candidate["blocks"][0]["tree"][0]["t"], "p")
+        self.assertEqual(self.session.save_rule(rid), "**답은 짧게**\n두 줄.")
+        rules = agent.load_rules(self.cfg)
+        self.assertEqual([(r["title"], r["body"]) for r in rules],
+                         [("답은 짧게", "**답은 짧게**\n두 줄.\n\nOrigin: 교정: 너무 길어")])
+        with open(self.path, encoding="utf-8") as f:
+            self.assertIn("Origin: 교정: 너무 길어", f.read())
+        self.assertTrue(of_type(self.session.events, "assistant")[-1]["text"].startswith("규칙으로 저장했다"))
+        self.assertEqual(self.session.rules_pending(), [])
+
+    def test_a_draft_that_cannot_be_stored_stays(self):
+        rid = self.session.propose_rule("**답은 짧게**", "x")
+        blocker = os.path.join(self.root, "blocker")
+        write(blocker, "a file")
+        nowhere = os.path.join(blocker, "agent-rules.md")  # folders are made as needed; under a file none can be
+        with mock.patch.object(agent, "_agent_cfg", return_value=agent_cfg(rules_path=nowhere)):
+            self.assertIsNone(self.session.save_rule(rid))
+        self.assertIn("규칙을 저장하지 못했다", of_type(self.session.events, "error")[-1]["message"])
+        self.assertEqual([{k: v for k, v in r.items() if k != "blocks"} for r in self.session.rules_pending()],
+                         [{"id": rid, "text": "**답은 짧게**"}])
+        self.assertEqual(self.session.save_rule(rid), "**답은 짧게**")  # the configured place works
+
+
+class Schedule(unittest.TestCase):
+    def test_the_jobs_that_can_be_read(self):
+        jobs = agent.parse_schedule([
+            {"name": "briefing", "at": "7:05", "days": ["mon", "fri", 3], "text": "아침 브리핑"},
+            {"text": "매 두 시간", "every_min": 120}, "not a dict", {"name": "x"}, {"name": "x", "text": "t", "at": "25:00"},
+            {"name": "x", "text": "t", "every_min": 0}, {"name": "x", "text": "t", "at": "08:00", "days": ["fon"]},
+            {"name": "x", "text": "t", "at": "8:5"}, 7, None])
+        self.assertEqual(jobs, [{"name": "briefing", "text": "아침 브리핑", "at": (7, 5), "days": [1, 3, 5]},
+                                {"name": "작업 2", "text": "매 두 시간", "every": 7200.0}])
+        self.assertEqual(agent.parse_schedule(None), [])
+        self.assertEqual(agent.parse_schedule("x"), [])
+
+    def loop(self, session, times, schedule, fire):
+        """Run scheduler_loop over the given clock readings (epoch seconds); returns what fire got."""
+        clock, got = [None], []
+
+        def wake(_):
+            if not times:
+                raise End
+            clock[0] = times.pop(0)
+
+        with mock.patch.object(agent, "_agent_cfg", return_value=agent_cfg(schedule=schedule)), \
+                mock.patch.object(agent, "fire", side_effect=lambda s, job: got.append(job["name"]) or fire):
+            with self.assertRaises(End):
+                agent.scheduler_loop(session, wake=wake, now=lambda: clock[0])
+        return got
+
+    def at(self, hour, minute, second=0):
+        return time.mktime((2026, 11, 25, hour, minute, second, 0, 0, -1))  # a Wednesday, local time
+
+    def test_a_job_runs_once_in_its_minute(self):
+        job = [{"name": "b", "at": "07:05", "text": "x"}]
+        got = self.loop(agent.AgentSession(), [self.at(7, 4, 58), self.at(7, 5, 0), self.at(7, 5, 40), self.at(7, 6, 0)],
+                        job, fire=True)
+        self.assertEqual(got, ["b"])
+        got = self.loop(agent.AgentSession(), [self.at(7, 4, 58), self.at(7, 6, 0)], job, fire=True)
+        self.assertEqual(got, [])  # its minute was never seen
+
+    def test_a_job_keeps_to_its_days(self):
+        job = [{"name": "b", "at": "07:05", "days": [1, 2, 4], "text": "x"}]  # not Wednesday
+        self.assertEqual(self.loop(agent.AgentSession(), [self.at(7, 5, 0)], job, fire=True), [])
+        job[0]["days"] = ["wed"]
+        self.assertEqual(self.loop(agent.AgentSession(), [self.at(7, 5, 0)], job, fire=True), ["b"])
+
+    def test_an_interval_job_runs_at_once_and_then_every_so_often(self):
+        t0, job = self.at(9, 0), [{"name": "s", "every_min": 120, "text": "x"}]
+        got = self.loop(agent.AgentSession(), [t0, t0 + 10, t0 + 7205, t0 + 7300, t0 + 14410], job, fire=True)
+        self.assertEqual(got, ["s", "s", "s"])
+        got = self.loop(agent.AgentSession(), [t0, t0 + 10, t0 + 20], job, fire=False)  # could not start
+        self.assertEqual(got, ["s", "s", "s"])  # so it is due again on every wake
+
+    def test_a_scheduled_job_runs_in_the_session_as_if_the_phone_asked(self):
+        session, job = agent.AgentSession(), {"name": "아침", "text": "오늘 일정"}
+        with mock.patch.object(agent, "llm_chat", lambda *a, **k: reply("브리핑")):
+            self.assertTrue(agent.fire(session, job))
+            deadline = time.monotonic() + 10
+            while session.state != "idle" and time.monotonic() < deadline:
+                time.sleep(0.01)
+        self.assertEqual(of_type(session.events, "user")[0]["text"], "예약된 작업「아침」을 실행한다: 오늘 일정")
+        self.assertEqual(session.history[0]["content"], "예약된 작업「아침」을 실행한다: 오늘 일정")
+        self.assertEqual(of_type(session.events, "assistant")[0]["text"], "브리핑")
+        self.assertEqual(of_type(session.events, "turn_end")[0]["reason"], "done")
+
+    def test_a_scheduled_job_that_needs_an_approval_waits_for_the_phone(self):
+        session = agent.AgentSession()
+        marker = os.path.join(tempfile.mkdtemp(prefix="swiv-agent-job-"), "later.txt")
+        self.addCleanup(shutil.rmtree, os.path.dirname(marker), ignore_errors=True)
+        asks = []
+
+        def model(cfg_agent, messages, tools, on_text=None):
+            asks.append(1)
+            return (reply(calls=[tool_call(1, "shell_run", {"command": "touch later.txt"})]) if len(asks) == 1
+                    else reply("승인이 없어 만들지 못했다"))
+
+        with mock.patch.object(agent, "FILES_ROOT", os.path.dirname(marker)), \
+                mock.patch.object(agent, "llm_chat", model):
+            self.assertTrue(agent.fire(session, {"name": "정리", "text": "파일을 만들어라"}))
+            deadline = time.monotonic() + 10
+            while session.state != "waiting" and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(session.state, "waiting")  # nobody is unattended: the phone is asked
+            self.assertFalse(os.path.exists(marker))
+            session.deny()  # the timeout would refuse it just the same
+            while session.state != "idle" and time.monotonic() < deadline:
+                time.sleep(0.01)
+        self.assertEqual(session.state, "idle")
+        self.assertFalse(os.path.exists(marker))
+        self.assertEqual([e["status"] for e in of_type(session.events, "tool_result")], ["denied"])
+        self.assertEqual(of_type(session.events, "assistant")[-1]["text"], "승인이 없어 만들지 못했다")
+        self.assertEqual(of_type(session.events, "turn_end")[0]["reason"], "done")
+
+    def test_a_job_is_skipped_while_a_turn_runs_or_the_budget_is_spent(self):
+        session, job, release = agent.AgentSession(), {"name": "b", "text": "x"}, threading.Event()
+
+        def slow(cfg_agent, messages, tools, on_text=None):
+            release.wait(10)
+            return reply("느림")
+
+        with mock.patch.object(agent, "llm_chat", slow):
+            session.start_turn("첫 요청")
+            deadline = time.monotonic() + 10
+            while not session.history and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(agent.fire(session, job))
+            self.assertIn("건너뛰었다", of_type(session.events, "notice")[-1]["text"])
+            release.set()
+            while session.state != "idle" and time.monotonic() < deadline:
+                time.sleep(0.01)
+        agent.reset_usage()
+        self.addCleanup(agent.reset_usage)
+        agent.spend(100)
+        with mock.patch.object(agent, "_agent_cfg", return_value=agent_cfg(daily_token_budget=100)):
+            self.assertFalse(agent.fire(session, job))
+        self.assertIn("예산", of_type(session.events, "notice")[-1]["text"])
+
+    def test_the_scheduler_is_one_daemon_thread(self):
+        agent._scheduler = None
+        self.addCleanup(setattr, agent, "_scheduler", None)
+        with mock.patch.object(agent, "scheduler_loop", side_effect=lambda: time.sleep(0.4)):
+            first = agent.start_scheduler()
+            try:
+                self.assertIs(agent.start_scheduler(), first)  # alive: the same one
+                self.assertTrue(first.daemon)
+                self.assertEqual(first.name, "agent-scheduler")
+            finally:
+                first.join(5)
+            self.assertIsNot(agent.start_scheduler(), first)  # gone: started again
+
+
+class Budget(unittest.TestCase):
+    def setUp(self):
+        agent.reset_usage()
+        self.addCleanup(agent.reset_usage)
+
+    def test_what_is_spent_counts_for_the_day(self):
+        self.assertEqual(agent.budget_left(agent_cfg()), (0, 0))
+        self.assertEqual(agent.spend(120), 120)
+        self.assertEqual(agent.spend("30"), 150)
+        self.assertEqual(agent.spend(None), 150)
+        self.assertEqual(agent.budget_left(agent_cfg(daily_token_budget=1000)), (1000, 150))
+        self.assertFalse(agent.budget_gone(agent_cfg(daily_token_budget=1000)))
+        self.assertTrue(agent.budget_gone(agent_cfg(daily_token_budget=150)))
+        self.assertTrue(agent.budget_gone(agent_cfg(daily_token_budget=10)))
+        tomorrow = time.time() + 86400
+        self.assertEqual(agent.budget_left(agent_cfg(daily_token_budget=150), tomorrow), (150, 0))  # a new day: zero
+
+    def test_the_usage_is_read_only_when_a_budget_asks_for_it(self):
+        cfg = agent_cfg(base_url="https://llm.example/v1", model="m")
+        ask = [{"role": "user", "content": "x"}]
+        usage = {"choices": [], "usage": {"total_tokens": 77}}
+        opener = FakeOpener(FakeStream([event("a"), b"data: [DONE]\n\n"]))
+        with mock.patch.object(agent.urllib.request, "build_opener", return_value=opener):
+            result = agent.llm_chat(cfg, ask, {}, on_text=lambda part: None)
+        self.assertIsNone(result["usage"])
+        self.assertNotIn("stream_options", json.loads(opener.requests[0].data))  # not asked for
+        opener = FakeOpener(FakeStream([event("a"), usage, b"data: [DONE]\n\n"]))
+        with mock.patch.object(agent.urllib.request, "build_opener", return_value=opener):
+            result = agent.llm_chat(cfg, ask, {}, on_text=lambda part: None)
+        self.assertEqual(result["usage"], 77)  # sent all the same: taken
+        opener = FakeOpener(FakeStream([event("a"), usage, b"data: [DONE]\n\n"]))
+        with mock.patch.object(agent.urllib.request, "build_opener", return_value=opener):
+            result = agent.llm_chat(agent_cfg(base_url="https://llm.example/v1", model="m", daily_token_budget=1000),
+                                    ask, {}, on_text=lambda part: None)
+        self.assertEqual(result["usage"], 77)
+        self.assertEqual(json.loads(opener.requests[0].data)["stream_options"], {"include_usage": True})
+        whole = json.dumps({"choices": [{"message": {"content": "x"}}], "usage": {"total_tokens": 5}}).encode()
+        opener = FakeOpener(FakeStream([whole], ctype="application/json"))
+        with mock.patch.object(agent.urllib.request, "build_opener", return_value=opener):
+            self.assertEqual(agent.llm_chat(cfg, ask, {})["usage"], 5)
+        self.assertEqual(agent._total_tokens(12), 12)
+        self.assertIsNone(agent._total_tokens(True))
+        self.assertIsNone(agent._total_tokens({"total_tokens": "many"}))
+
+
+class TheBudgetInATurn(TurnCase):
+    def setUp(self):
+        super().setUp()
+        agent.reset_usage()
+        self.addCleanup(agent.reset_usage)
+        self.cfg["daily_token_budget"] = 200
+
+    def test_a_turn_stops_once_the_budget_is_spent(self):
+        read = {"id": "call_1", "name": "files_read", "arguments": {"path": "note.txt"}}
+        self.turn(dict(reply(calls=[read]), usage=150), dict(reply(calls=[read]), usage=60), reply("never said"))
+        events = self.complete_turn()
+        self.assertEqual(len(self.llm.calls), 2)  # the second call went over: no third
+        self.assertEqual(events[-1]["reason"], "budget")
+        self.assertTrue(of_type(events, "assistant")[-1]["text"].startswith("오늘의 토큰 예산을 다 써서"))
+        self.assertEqual(agent.budget_left(self.cfg), (200, 210))
+        self.assertFalse(self.session.start_turn("또 부탁"))  # and the next request is refused at the door
+        self.assertIn("예산(200)", of_type(self.session.events, "error")[-1]["message"])
+        self.assertEqual(len(self.llm.calls), 2)
+
+
+class TheJournal(TurnCase):
+    def test_what_ran_and_what_was_approved_reaches_the_journal(self):
+        lines = []
+        with mock.patch.object(agent, "LOG", lines.append):
+            self.cfg["allow_commands"].append("echo")
+            self.turn(reply(calls=[tool_call(1, "shell_run", {"command": "echo hi"}),
+                                   tool_call(2, "shell_run", {"command": "echo secret > f"})]), reply("했다"))
+            mark = self.start()
+            self.request(mark)
+            self.session.approve()
+            self.wait_end(mark)
+            self.turn(reply(calls=[tool_call(3, "shell_run", {"command": "rm x"})]), reply("막혔다"))
+            self.complete_turn()
+            self.turn(reply(calls=[tool_call(4, "files_write", {"path": "n.txt", "text": "private value"})]),
+                      reply("안 했다"))
+            mark = self.start()
+            self.request(mark)
+            self.session.deny()
+            self.wait_end(mark)
+        self.assertEqual(lines, [
+            "agent tool shell_run [instant] ok: echo hi",
+            "agent approval call_2 shell_run: granted",
+            "agent tool shell_run [approval] ok: echo secret > f",
+            "agent tool shell_run [blocked] blocked",
+            "agent approval call_4 files_write: refused",
+            "agent tool files_write [approval] denied: path,text",
+        ])
+        self.assertNotIn("private value", "\n".join(lines))  # a tool's values may be private: names only
+
+    def test_a_journal_that_fails_changes_nothing(self):
+        with mock.patch.object(agent, "LOG", side_effect=RuntimeError("journal gone")):
+            self.turn(reply("답"))
+            events = self.complete_turn()
+        self.assertEqual(events[-1]["reason"], "done")
+
+    def test_a_timeout_and_the_stop_button_are_told_apart(self):
+        lines = []
+        with mock.patch.object(agent, "LOG", lines.append):
+            self.cfg["approval_timeout_sec"] = 0.1
+            self.turn(reply(calls=[tool_call(1, "shell_run", {"command": "touch a.txt"})]), reply("x"))
+            self.complete_turn()
+            self.turn(reply(calls=[tool_call(2, "shell_run", {"command": "touch b.txt"})]), reply("x"))
+            mark = self.start()
+            self.request(mark)
+            self.session.stop()
+            self.wait_end(mark)
+        self.assertEqual(lines, ["agent approval call_1 shell_run: timed out",
+                                 "agent tool shell_run [approval] denied: touch a.txt",
+                                 "agent approval call_2 shell_run: refused",
+                                 "agent tool shell_run [approval] denied: touch b.txt"])
+
+
+class CommandLine(unittest.TestCase):
+    def setUp(self):
+        self.dir = os.path.realpath(tempfile.mkdtemp(prefix="swiv-agent-cli-"))
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.cfg = agent_cfg(rules_path=os.path.join(self.dir, "rules", "agent-rules.md"))
+        for patcher in (mock.patch.object(agent, "_agent_cfg", return_value=self.cfg),
+                        mock.patch.object(agent, "FILES_ROOT", self.dir)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        agent.reset_usage()
+        self.addCleanup(agent.reset_usage)
+
+    def cli(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            return agent.main(list(argv)), out.getvalue()
+
+    def test_rules_can_be_added_and_listed(self):
+        code, out = self.cli("--rule", "답은 짧게")
+        self.assertEqual((code, out.strip()), (0, "**답은 짧게**"))
+        self.cli("--rule", "**두 번째**\n설명")
+        code, out = self.cli("--rules")
+        self.assertEqual(code, 0)
+        self.assertIn("답은 짧게 (", out)
+        self.assertIn("**두 번째**\n설명", out)
+
+    def test_the_schedule_can_be_checked_and_a_bad_entry_is_named(self):
+        self.cfg["schedule"] = [{"name": "b", "at": "07:30", "text": "x"}, {"name": "s", "every_min": 90, "text": "y"},
+                                {"name": "bad", "text": "t", "at": "7h30"}]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, out = self.cli("--schedule")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "b  07:30  x\ns  every 90 min  y\n")
+        self.assertIn("schedule entry 3 skipped (at은 HH:MM이다)", err.getvalue())
+
+    def test_once_runs_a_turn_alone_and_does_what_needs_nobody(self):
+        marker, calls = os.path.join(self.dir, "x.txt"), []
+
+        def model(cfg_agent, messages, tools, on_text=None):
+            calls.append(cfg_agent["approval_timeout_sec"])
+            if len(calls) == 1:
+                return {"text": "", "tool_calls": [{"id": "c1", "name": "shell_run",
+                                                    "arguments": {"command": "touch x.txt"}}]}
+            return {"text": "승인이 없어 만들지 못했다", "tool_calls": []}
+
+        with mock.patch.object(agent, "llm_chat", model):
+            code, out = self.cli("--once", "x.txt 만들어줘")
+        self.assertEqual((code, calls), (0, [0, 0]))  # nobody is there: nothing waits for an approval
+        self.assertIn("[denied] shell_run", out)
+        self.assertIn("승인이 없어 만들지 못했다", out)
+        self.assertFalse(os.path.exists(marker))
+
+    def test_once_without_a_model_says_so(self):
+        with mock.patch.object(agent, "llm_chat", agent.llm_chat):  # the real client: nothing is configured
+            code, out = self.cli("--once", "안녕")
+        self.assertEqual(code, 1)
+        self.assertIn("오류: agent.base_url과 agent.model을 설정해야 한다", out)
+        with self.assertRaises(SystemExit):
+            self.cli()
 
 
 if __name__ == "__main__":

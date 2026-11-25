@@ -149,15 +149,24 @@ def _snippet(node, chars=SNIPPET_CHARS):
     return text
 
 
+def format_rules(rules, heading="행동 규칙 (검증됨)"):
+    """Just the rules, as the coach block shows them, under `heading`: ""
+    when there are none."""
+    if not rules:
+        return ""
+    out = ["## " + heading]
+    for r in rules:
+        head = "### " + (r.get("title") or "(제목 없는 규칙)")
+        if r.get("date"):
+            head += " (%s)" % r["date"]
+        out += [head, r.get("body") or ""]
+    return "\n".join(out)
+
+
 def _render(kept, rules):
     out = ["[coach] 로컬 지식 컨텍스트 (읽기 전용, 검증된 자산)"]
     if rules:
-        out += ["", "## 행동 규칙 (검증됨)"]
-        for r in rules:
-            head = "### " + (r.get("title") or "(제목 없는 규칙)")
-            if r.get("date"):
-                head += " (%s)" % r["date"]
-            out += [head, r.get("body") or ""]
+        out += ["", format_rules(rules)]
     if kept:
         out += ["", "## 장기 기억 (관련 노드)"]
         for n in kept:

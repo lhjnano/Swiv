@@ -90,6 +90,9 @@ def _agent_view(session, since=None, history=0, wait=0, full=False):
                 view["md"] = md
         if history:
             view["history"] = session.history_view(history)
+        rules = session.rules_pending()  # rule drafts waiting for the phone, to show again
+        if rules:
+            view["rules"] = rules
         return view
 
 
@@ -306,6 +309,11 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"ok": agent.get_session().deny(body.get("call_id"))})
             if path == "/agent/stop":  # end the turn: what is shown stays, an approval counts as refused
                 return self._json({"ok": agent.get_session().stop()})
+            if path == "/agent/rule":  # the phone's word on a rule the model drafted from a correction
+                session = agent.get_session()
+                done = (session.save_rule(body.get("id")) if body.get("save")
+                        else session.drop_rule(body.get("id")))
+                return self._json({"ok": bool(done)})
             return self._send(404, "text/plain", b"not found")
         cid = self._card(body.get("id"))
         if cid is None:
@@ -529,6 +537,9 @@ def main():
         if mods:
             print(f"warning: PAM service {H.cfg['pam_service']!r} uses {', '.join(mods)}; keep "
                   "login_global_max_failures below its deny count or the account can lock", flush=True)
+    agent.LOG = log  # what the agent runs and what was approved, in the journal
+    if _agent_on(H.cfg):
+        agent.start_scheduler()
     threading.Thread(target=cards.reaper, daemon=True).start()
     srv = TlsServer((H.cfg["bind"], int(H.cfg["port"])), H)
     scheme = "http"

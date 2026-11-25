@@ -140,7 +140,8 @@ agent.py  에이전트 루프 (세션별 스레드 · 이벤트 버퍼 · 승인
   닫는다(닫히지 않은 펜스는 Markdown이 코드로 보지 않는다)
 - `server.py`: `H` 라우터에 엔드포인트 추가 — `POST /agent/chat`(메시지 접수),
   `POST /agent/approve`, `POST /agent/cancel`, `POST /agent/stop`(턴 중지),
-  `GET /agent/poll?since=&wait=&full=`(롱폴), `GET /agent/session`(히스토리/상태).
+  `POST /agent/rule`(규칙 후보의 저장·버림), `GET /agent/poll?since=&wait=&full=`(롱폴),
+  `GET /agent/session`(히스토리/상태).
   `/cards` 응답의 head에
   `{"kind":"agent","id":"agent","title":"agent"}`를 `cfg`의 `agent.enabled`일 때
   추가한다. `CARD_RE`에 `agent`를 추가한다. 예상 증분은 50줄 내외다
@@ -163,6 +164,14 @@ agent.py  에이전트 루프 (세션별 스레드 · 이벤트 버퍼 · 승인
 - `agent.max_tokens`, `agent.temperature`
 - `agent.allow_commands`, `agent.block_commands`: 셸 화이트리스트/블록리스트
 - `agent.approval_timeout_sec` (120), `agent.shell_timeout_sec` (60)
+- `agent.daily_token_budget` (0, 제한 없음): 모델이 하루에 쓸 토큰. 0보다 크면 스트림에
+  `stream_options`를 붙여 사용량을 묻는다(이 설정을 켤 때만 붙는다: 어떤 provider는 모르는
+  필드를 거절한다). 서버를 다시 띄우면 0부터 다시 센다
+- `agent.rules_path` (`~/.config/swiv/agent-rules.md`): 사용자가 가르친 규칙. coach의
+  `rules.md`와 같은 꼴이라 `coach.load_rules`로 읽는다. coach 파일은 읽기만 한다
+- `agent.schedule` (`[]`): 서버가 스스로 돌리는 작업. `{"name", "text", "at": "HH:MM",
+  "days": [1..7]}` 또는 `{"name", "text", "every_min": N}`. 못 쓴 항목은 stderr에 이름을
+  대고 건너뛴다(서버는 그대로 뜬다)
 - `agent.coach` (아래 coach 절)
 
 ## 에이전트 루프 선택
@@ -356,6 +365,12 @@ swiv는 `agent.coach.enabled`로 기능 전체를 끌 수 있게 한다.
   승인/거부/타임아웃 모두 journal에 `agent approval …` 행으로 기록된다(기존 login 감사
   행과 같은 `log()` 경로)
 - **API 키**: config.json(0600)에만 둔다. `log()` 출력과 이벤트 버퍼에서 마스킹한다
+- **감사 로그**: 도구가 끝날 때와 승인이 결판날 때 `agent …` 한 줄을 저널에 남긴다
+  (`server.log`, 서비스 아래에서는 journal). 셸 명령은 첫 줄까지 적고, 다른 도구는
+  인자의 **이름만** 적는다(값은 사적인 내용일 수 있다). 저널을 쓰다 실패해도 턴은
+  멈추지 않는다
+- **비용**: `agent.daily_token_budget`을 두면 그 날의 사용량이 한도에 닿는 순간 턴이
+  멈추고(이유 `budget`) 다음 요청은 받지 않는다. 하루가 바뀌면 0부터 다시 센다
 - **파일 경계**: files 도구는 `files.resolve`(realpath + commonpath)를 그대로 쓰므로
   `../`와 루트 밖 심링크가 차단된다. `shell_run`은 파일 경계 밖에서 자유롭지만, 그
   대신 명령 수준 게이트와 승인이 지킨다 — 셸 카드가 같은 계정으로 같은 로그인 뒤에서
@@ -415,6 +430,18 @@ swiv는 `agent.coach.enabled`로 기능 전체를 끌 수 있게 한다.
 - 완료 판정: (1) 교정 한 건이 rules.md에 `## Rule`로 기록되고 다음 세션 시스템
   프롬프트에 등장(fixture rules.md 테스트). (2) cron 작업이 승인 필요 도구에서
   안전하게 보류됨(테스트). (3) 룰 후보가 사용자 승인 없이는 주입되지 않음(테스트)
+- 구현됨(2026-11-25). 완료 판정 셋 다 테스트로 고정했다. 설계에서 바꾼 것:
+  - **예약 작업은 서버 안의 스레드가 돈다**(`agent.start_scheduler`), systemd 타이머가
+    아니라. 턴이 폰이 보는 같은 세션에서 돌아야 승인 요청이 폰에 뜨고, 답이 없으면
+    120초 뒤 거부되는 "보류"가 저절로 된다. 별도 프로세스로 돌면 무인 승인을 허용하는
+    경로를 따로 만들어야 한다. CLI의 `--once`는 남겼지만 점검용이고, 승인 대기가 0초라
+    승인이 필요한 일은 하지 않는다
+  - **규칙은 swiv 자체 파일**(`agent.rules_path`)에 둔다. usage-coach의 `rules.md`는
+    하네스가 일반화한 결과물이라 거기에 쓰지 않는다. 시스템 프롬프트에는 "사용자가 정한
+    규칙" 먼저, 그 다음 coach 블록이 들어간다
+  - 교정은 두 갈래다. `/기억 <규칙>`은 모델을 거치지 않고 적은 대로 저장한다.
+    `/교정 <잘못>`은 모델이 이번 세션의 실패 기록(거부·차단·오류)과 함께 규칙 초안을
+    쓰고, 폰이 **저장**을 눌러야 파일에 들어간다. 초안은 어디에도 주입되지 않는다
 
 ## 리스크와 트레이드오프
 
@@ -479,6 +506,13 @@ Chrome(390×844)로 실제 화면을 캡처해 고쳤다.
 | 코드 블록·표 | HTML은 나오지만 Text 위젯이 꾸미지 않고 `::part`도 없음 → 직접 Text 컴포넌트를 짜야 함 | 코드 카드(언어·복사·하이라이트) |
 | 스트리밍 | 텍스트가 바뀔 때마다 원문 먼저 보여주고 비동기로 HTML로 바꿈 | 확정 블록은 다시 그리지 않음 |
 | 프로토콜 | 0.8 / 0.9 / 1.0 세 버전을 한 패키지에 export, 11/23 재발행 | — |
+
+**Phase 4 (2026-11-25): 무인으로 돌아가는 것들**
+
+예약 작업과 규칙 학습은 둘 다 "사용자가 자리에 없을 때 뭔가 알아서 돈다"는 뜻이라,
+묻는 사람이 없을 때 무엇이 허용되는지를 먼저 정했다. 규칙: 사용자가 자리에 없어도
+**읽기**는 한다, **승인**은 그냥 통과시키지 않는다(기다리다 거부), **규칙**은 폰이
+저장한 것만 든다. 그래서 예약 작업은 세션 안에서 돌고, `--once`는 승인을 전부 거부한다.
 
 **Phase 3 (2026-11-25): 승인 없이 실행되는 경로**
 

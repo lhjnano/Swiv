@@ -18,6 +18,9 @@ takes the content and redraws it for the phone.
   one card per window, and other apps appear as read only text cards.
 - Shell cards from the + menu: shells inside swiv whose input also works
   while the desktop is locked.
+- Agent card (off by default): a chat with an assistant that runs on the
+  desktop itself and acts on it through a few tools (shell commands, files,
+  browser tabs). Anything that changes something waits for a tap on the phone.
 - The desktop wallpaper and the default terminal profile (colors, transparency,
   font) are mirrored.
 

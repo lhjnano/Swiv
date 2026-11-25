@@ -90,6 +90,9 @@
     ],
     "approval_timeout_sec": 120,
     "shell_timeout_sec": 60,
+    "daily_token_budget": 0,
+    "rules_path": "~/.config/swiv/agent-rules.md",
+    "schedule": [],
     "coach": {
       "enabled": false,
       "nodes_path": "~/.cache/opencode-usage-coach/shared/nodes.ndjson",

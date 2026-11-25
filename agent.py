@@ -58,6 +58,17 @@ class _Stopped(Exception):
     """The phone stopped the turn; raised out of the stream reader."""
 
 
+LOG = None  # server.log once the server is up: the journal under the service
+
+
+def _audit(message):
+    if LOG:
+        try:
+            LOG("agent " + message)
+        except Exception:
+            pass  # the journal is for looking back; it never stops a turn
+
+
 def _agent_cfg():
     """cfg["agent"] over its defaults. config.load() merges one level deep, so
     a partial "agent" object in the config file must not drop the other keys."""
@@ -831,6 +842,8 @@ def llm_chat(cfg_agent, messages, tools, on_text=None):
         raise LLMError("agent.base_url과 agent.model을 설정해야 한다")
     key = str(cfg_agent.get("api_key") or "")
     body = {"model": model, "messages": list(messages), "stream": on_text is not None}
+    if on_text is not None and _num(cfg_agent.get("daily_token_budget"), 0) > 0:
+        body["stream_options"] = {"include_usage": True}  # a budget asks what a stream used
     max_tokens = _num(cfg_agent.get("max_tokens"), 0)
     if max_tokens > 0:
         body["max_tokens"] = int(max_tokens)
@@ -881,9 +894,11 @@ def llm_chat(cfg_agent, messages, tools, on_text=None):
         raise LLMError(_redact("LLM 호출 실패: " + last, key)) from None
     if message is None:
         try:
-            message = json.loads(raw)["choices"][0]["message"]
+            whole, message = json.loads(raw), json.loads(raw)["choices"][0]["message"]
         except (ValueError, KeyError, IndexError, TypeError):
             raise LLMError("LLM 응답 형식이 다르다") from None
+        if isinstance(whole, dict) and isinstance(message, dict) and whole.get("usage"):
+            message = dict(message, usage=whole["usage"])
     return _message(message)
 
 
@@ -910,14 +925,22 @@ def _message(message):
             "name": str(function.get("name") or ""),
             "arguments": arguments if isinstance(arguments, dict) else {},
         })
-    return {"text": text, "tool_calls": calls}
+    return {"text": text, "tool_calls": calls, "usage": _total_tokens(message.get("usage"))}
+
+
+def _total_tokens(usage):
+    """What one completion used, when its provider says (a usage object or a
+    number); None when it does not."""
+    if isinstance(usage, dict):
+        usage = usage.get("total_tokens")
+    return usage if isinstance(usage, (int, float)) and not isinstance(usage, bool) else None
 
 
 def _read_stream(response, on_text, key):
     """The server-sent events of a streamed completion, joined into one
     message object for _message. Text pieces go to on_text as they come; a
     tool call arrives in pieces too and is joined by its index."""
-    text, slots, size = [], {}, 0
+    text, slots, size, usage = [], {}, 0, None
     for line in response:
         size += len(line)
         line = line.strip()
@@ -932,6 +955,8 @@ def _read_stream(response, on_text, key):
             continue
         if not isinstance(chunk, dict):
             continue
+        if isinstance(chunk.get("usage"), dict):  # the last chunk, when asked for
+            usage = chunk["usage"]
         if isinstance(chunk.get("error"), dict):  # some providers stream their errors as a chunk
             raise LLMError(_redact("LLM 스트림 오류: %s"
                                    % (chunk["error"].get("message") or chunk["error"]), key))
@@ -962,7 +987,99 @@ def _read_stream(response, on_text, key):
                 function.get("arguments"), str) else ""
         if size > RESPONSE_MAX_BYTES:
             raise LLMError("LLM 스트림이 너무 길다")
-    return {"content": "".join(text), "tool_calls": list(slots.values())}
+    return {"content": "".join(text), "tool_calls": list(slots.values()), "usage": usage}
+
+
+# --- what a day has cost --------------------------------------------------------
+
+_usage, _USAGE_LOCK = {"day": "", "tokens": 0}, threading.Lock()
+
+
+def _day(now=None):
+    return time.strftime("%Y-%m-%d", time.localtime(now) if now is not None else time.localtime())
+
+
+def reset_usage(now=None):
+    """Forget what was spent (a new day, a test, the command line)."""
+    with _USAGE_LOCK:
+        _usage.update(day=_day(now), tokens=0)
+
+
+def spend(tokens):
+    """Count `tokens` against today and say how many today has used."""
+    with _USAGE_LOCK:
+        day = _day()
+        if _usage["day"] != day:
+            _usage.update(day=day, tokens=0)  # a new day starts at zero
+        _usage["tokens"] += max(0, int(tokens or 0))
+        return _usage["tokens"]
+
+
+def budget_left(cfg_agent, now=None):
+    """(limit, used today) for the model's tokens; a limit of 0 means none."""
+    with _USAGE_LOCK:
+        used = _usage["tokens"] if _usage["day"] == _day(now) else 0
+    return int(_num(cfg_agent.get("daily_token_budget"), 0)), used
+
+
+def budget_gone(cfg_agent, now=None):
+    limit, used = budget_left(cfg_agent, now)
+    return limit > 0 and used >= limit
+
+
+# --- what the user taught --------------------------------------------------------
+
+RULE_MAX = 2000  # characters of one rule
+RULE_PROMPT = """사용자가 데스크톱 비서 에이전트의 잘못을 바로잡고 있다. 그 교정에서 에이전트가 앞으로 지킬 행동 규칙 하나를 쓴다.
+
+형식: 첫 줄은 **규칙 한 문장**(굵게). 필요하면 그 아래 두세 줄로 설명. "## Rule" 같은 제목 줄, Origin 줄, 규칙 외의 말은 쓰지 않는다.
+규칙은 에이전트가 할 일과 하지 말 일을 구체적으로, 나중에 지켰는지 확인할 수 있게 적는다. 사용자가 말한 범위를 넘어 일반화하지 않는다. 근거는 교정 내용과 이번 세션의 실패 기록뿐이다."""
+
+
+def _rule_text(text):
+    """A rule as it is stored: markdown, its first **bold** line the title. A
+    "## Rule" heading a model may have added goes; a rule in plain words gets
+    its first line for the title. "" when nothing is left."""
+    lines = [line.rstrip() for line in _clean(text or "").strip().split("\n")]
+    lines = [line for line in lines if not re.match(r"^##\s+Rule", line)]
+    while lines and not lines[0]:
+        lines.pop(0)
+    rule = "\n".join(lines).strip()
+    if rule and "**" not in rule:
+        head, _, rest = rule.partition("\n")
+        rule = "**%s**%s" % (head.strip(), "\n\n" + rest.strip() if rest.strip() else "")
+    return rule[:RULE_MAX]
+
+
+def load_rules(cfg_agent):
+    """The rules of the agent's own file, as coach reads them."""
+    path = cfg_agent.get("rules_path")
+    return coach.load_rules(os.path.expanduser(path)) if path else []
+
+
+def add_rule(cfg_agent, text, origin):
+    """Append a rule to the agent's own file, in the form coach reads, and
+    return it as stored."""
+    rule = _rule_text(text)
+    if not rule:
+        raise ValueError("저장할 규칙이 비어 있다")
+    path = os.path.expanduser(str(cfg_agent.get("rules_path") or ""))
+    if not path or path == ".":
+        raise ValueError("agent.rules_path가 설정되지 않았다")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n## Rule (%s)\n%s\n\nOrigin: %s\n" % (time.strftime("%Y-%m-%d"), rule,
+                                                         _clean(origin or "").replace("\n", " ")))
+    return rule
+
+
+def _command(user_text):
+    """"rule", "fix", or None: whether a chat text is one of the two commands."""
+    text = user_text.strip()
+    for name, prefixes in (("rule", ("/기억", "/rule")), ("fix", ("/교정", "/fix"))):
+        if any(text == p or text.startswith(p + " ") for p in prefixes):
+            return name
+    return None
 
 
 # --- system prompt ------------------------------------------------------------
@@ -978,9 +1095,13 @@ def _coach_block(coach_cfg, query):
 
 
 def system_prompt(cfg_agent, query):
-    """The Korean base prompt, plus the coach block when enabled. A coach
-    that fails leaves the base prompt alone."""
+    """The Korean base prompt, the rules the user taught, and the coach block
+    when enabled. Either that fails leaves what came before alone."""
     parts = [BASE_PROMPT]
+    try:
+        parts.append(coach.format_rules(load_rules(cfg_agent), "사용자가 정한 규칙"))
+    except Exception as e:  # the rules are a file: a bad one must not stop a turn
+        sys.stderr.write("agent: own rules skipped (%s)\n" % type(e).__name__)
     coach_cfg = cfg_agent.get("coach")
     if isinstance(coach_cfg, dict) and coach_cfg.get("enabled"):
         try:
@@ -1020,6 +1141,8 @@ class AgentSession:
         self._draft = None  # {"n", "text", "blocks"} while an answer text is written
         self._texts = 0  # answer texts so far: the n of the next one
         self._md = {}  # n -> {i: tree}: the rendered blocks of finished texts
+        self._rules, self._rule_n = {}, 0  # rule drafts waiting for the phone: id -> (rule, origin)
+        self._blocks = {}  # their rendered blocks, shown again to a phone back on the card
 
     def emit(self, etype, **data):
         with self.lock:
@@ -1179,19 +1302,29 @@ class AgentSession:
         return False
 
     def start_turn(self, user_text):
-        """Run run_turn(user_text) on a daemon thread. False, with an error
-        event, when the text is empty or a turn is already running."""
+        """Run the text on the turn thread: a request goes to the model
+        (run_turn), "/rule" and "/fix" to their own handlers. False, with an
+        error event, when the text is empty, a turn already runs, or the day's
+        token budget is spent."""
         with self.lock:
             if self.state != "idle":
                 return self._fail("이미 진행 중인 요청이 있습니다")
             if not isinstance(user_text, str) or not user_text.strip():
                 return self._fail("빈 메시지입니다")
-            self._stop.clear()  # the new turn can be stopped
-            self._draft = None
-            self.state = "running"
-            threading.Thread(target=run_turn, args=(self, user_text), name="agent-turn",
-                             daemon=True).start()
+            limit, used = budget_left(_agent_cfg())
+            if limit and used >= limit:
+                return self._fail("오늘의 토큰 예산(%d)을 다 썼다. 내일 다시, 아니면 "
+                                  "agent.daily_token_budget을 올린다" % limit)
+            self._launch(RULE_COMMANDS.get(_command(user_text), run_turn), user_text)
         return True
+
+    def _launch(self, target, text):
+        """Start target(self, text) on the turn thread. The caller holds the
+        lock and has made sure the session is idle."""
+        self._stop.clear()  # the new turn can be stopped
+        self._draft = None
+        self.state = "running"
+        threading.Thread(target=target, args=(self, text), name="agent-turn", daemon=True).start()
 
     def wait_approval(self, call, timeout):
         """Ask for approval (approval_request event, state waiting) and block
@@ -1204,7 +1337,9 @@ class AgentSession:
             self.emit("approval_request", call_id=call["id"], name=call["name"],
                       args=call["arguments"], timeout_sec=timeout)
         try:
-            pending["event"].wait(timeout)
+            answered = pending["event"].wait(timeout)
+            _audit("approval %s %s: %s" % (call["id"], call["name"], "granted" if pending["ok"]
+                                           else "refused" if answered else "timed out"))
             return pending["ok"]
         finally:
             with self.lock:
@@ -1229,6 +1364,51 @@ class AgentSession:
     def deny(self, call_id=None):
         return self._decide(False, call_id)
 
+    def propose_rule(self, rule, origin=""):
+        """A rule the model drafted from the user's correction. It is shown to
+        the phone and becomes a rule only when the phone says so."""
+        blocks = [{"i": i, "tree": tree} for i, tree, _ in mdview.message(rule, final=True)]
+        with self.lock:
+            self._rule_n += 1
+            rid = "r%d" % self._rule_n
+            self._rules[rid] = (rule, origin)
+            self._blocks[rid] = blocks  # shown as the answers are: built, never parsed as HTML
+            self.emit("rule_candidate", id=rid, text=rule, blocks=blocks)
+            return rid
+
+    def rules_pending(self):
+        """[{"id", "text", "blocks"}]: the rule drafts still waiting for the phone."""
+        with self.lock:
+            return [{"id": rid, "text": rule, "blocks": self._blocks.get(rid, [])}
+                    for rid, (rule, _) in self._rules.items()]
+
+    def save_rule(self, rid):
+        """The phone said yes. The stored rule, or None for no such draft."""
+        with self.lock:
+            item = self._rules.pop(rid, None) if isinstance(rid, str) else None
+            self._blocks.pop(rid, None)
+        if not item:
+            return None
+        try:
+            stored = add_rule(_agent_cfg(), *item)
+        except (OSError, ValueError) as e:  # the draft stays: the phone can try again
+            with self.lock:
+                self._rules[rid] = item
+            self.emit("error", message="규칙을 저장하지 못했다: %s" % e)
+            return None
+        _audit("rule saved: %s" % stored.splitlines()[0][:120])
+        self.emit_assistant("규칙으로 저장했다. 다음 요청부터 지킨다:\n\n%s" % stored)
+        return stored
+
+    def drop_rule(self, rid):
+        """The phone said no."""
+        with self.lock:
+            dropped = self._rules.pop(rid, None) if isinstance(rid, str) else None
+            self._blocks.pop(rid, None)
+        if dropped:
+            self.emit("notice", text="규칙 후보를 버렸다")
+        return bool(dropped)
+
     def stop(self):
         """End the turn that runs: the text shown so far is kept, and an
         approval being waited for counts as refused. False when no turn runs."""
@@ -1243,22 +1423,37 @@ class AgentSession:
             return True
 
 
+def _audit_args(call):
+    """What the journal keeps of a call: a shell command in full (the record of
+    what ran), any other tool by its argument names (values may be private)."""
+    args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+    if call.get("name") == "shell_run" and isinstance(args.get("command"), str):
+        return args["command"].strip().split("\n")[0][:200]
+    return ",".join(sorted(args))
+
+
 def _handle_call(session, call, cfg_agent):
     """Gate, then run one tool call of the loop; returns (result, status)."""
+    grade = _grade(call, cfg_agent)
     session.emit("tool_call", call_id=call["id"], name=call["name"], args=call["arguments"],
-                 grade=_grade(call, cfg_agent))
+                 grade=grade)
+    result = status = None
     if gate_denies(call, cfg_agent):
-        return "blocked by policy", "blocked"
-    if gate_needs_approval(call, cfg_agent):
-        if not session.wait_approval(call, cfg_agent.get("approval_timeout_sec")):
-            return "denied by user or timeout", "denied"
-    return run_tool(call, cfg_agent), "ok"
+        result, status = "blocked by policy", "blocked"
+    elif not gate_needs_approval(call, cfg_agent) or session.wait_approval(
+            call, cfg_agent.get("approval_timeout_sec")):
+        result, status = run_tool(call, cfg_agent), "ok"
+    else:
+        result, status = "denied by user or timeout", "denied"
+    _audit("tool %s [%s] %s%s" % (call["name"], grade, status,
+                                  ": " + _audit_args(call) if status != "blocked" else ""))
+    return result, status
 
 
 def run_turn(session, user_text):
     """One user turn, as in the pseudocode of docs/agent-card.md. The answer
     text streams to the phone as it comes. Returns the turn_end reason:
-    done | stopped | max_steps | error."""
+    done | stopped | budget | max_steps | error."""
     reason, cfg, stopped = "done", {}, False
     try:
         cfg = _agent_cfg()
@@ -1271,12 +1466,18 @@ def run_turn(session, user_text):
             if stopped:
                 reason = "stopped"
                 break
+            if budget_gone(cfg):  # spent since this turn began
+                reason = "budget"
+                session.emit_assistant("오늘의 토큰 예산을 다 써서 여기서 멈춘다.")
+                break
             messages = [{"role": "system", "content": system}]
             try:
                 resp = llm_chat(cfg, messages + session.recent_history(), TOOLS,
                                 on_text=session.feed_text)
             except _Stopped:
                 resp = {"text": session.draft_text(), "tool_calls": []}
+            if resp.get("usage"):
+                spend(resp["usage"])
             stopped = session.is_stopped()
             if not resp["tool_calls"]:
                 if resp["text"] or not stopped:
@@ -1331,3 +1532,228 @@ def reset_session():
     if old is not None:
         old.stop()  # a turn still running ends on its own, its approval refused
     return _SESSION
+
+
+# --- the two commands of the chat ---------------------------------------------
+
+def _refuse_command(session, e):
+    session.emit("error", message=str(e) if isinstance(e, (LLMError, ValueError, OSError))
+                 else "%s: %s" % (type(e).__name__, e))
+    return "error"
+
+
+def run_rule(session, user_text):
+    """"/rule <rule>" ("/기억"): what the user states becomes a rule, as
+    written and without the model. Returns the turn_end reason."""
+    reason = "done"
+    try:
+        parts = user_text.strip().split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            raise ValueError("규칙을 적어 달라: /기억 <규칙>")
+        session.add_message({"role": "user", "content": user_text})
+        stored = add_rule(_agent_cfg(), parts[1], "사용자가 채팅에서 정함")
+        _audit("rule added: %s" % stored.splitlines()[0][:120])
+        session.emit_assistant("규칙으로 저장했다. 다음 요청부터 지킨다:\n\n%s" % stored)
+    except Exception as e:  # the phone gets the failure as an event
+        reason = _refuse_command(session, e)
+    finally:
+        session.set_state("idle")
+        session.emit("turn_end", reason=reason)
+    return reason
+
+
+def _correction_context(session, what):
+    """The user's correction, after what went wrong before it in this session."""
+    lines = ["교정: " + what.strip()]
+    asked = {e["call_id"]: e.get("args") for e in session.events if e["type"] == "tool_call"}
+    failures = [e for e in session.events if e["type"] == "error"
+                or (e["type"] == "tool_result" and e.get("status") not in ("ok", None))]
+    for e in failures[-8:]:
+        if e["type"] == "error":
+            lines.append("- 오류: %s" % _clean(e.get("message"))[:300])
+        else:
+            lines.append("- 도구 %s %s: %s → %s" % (
+                e.get("name"), json.dumps(asked.get(e["call_id"]), ensure_ascii=False)[:200],
+                e.get("status"), _clean(e.get("result"))[:200]))
+    for m in [m["content"] for m in session.history if m.get("role") == "user"][-3:]:
+        lines.append("최근 요청: " + _clean(m)[:200])
+    return "\n".join(lines)
+
+
+def run_correction(session, user_text):
+    """"/fix <what went wrong>" ("/교정"): the model drafts a rule from the
+    correction and the failures before it. The draft is shown to the phone and
+    is stored only when the phone says so (save_rule)."""
+    reason = "done"
+    try:
+        parts = user_text.strip().split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            raise ValueError("무엇이 잘못였는지 적어 달라: /교정 <잘못>")
+        session.add_message({"role": "user", "content": user_text})
+        resp = llm_chat(_agent_cfg(), [{"role": "system", "content": RULE_PROMPT},
+                                       {"role": "user", "content": _correction_context(session, parts[1])}], {})
+        if resp.get("usage"):
+            spend(resp["usage"])
+        rule = _rule_text(resp["text"])
+        if not rule:
+            raise LLMError("모델이 규칙을 만들지 못했다. 다른 말로 한 번 더 알려 달라")
+        session.propose_rule(rule, "사용자가 교정하고 폰에서 승인함: " + parts[1].strip()[:200])
+    except Exception as e:  # the phone gets the failure as an event
+        reason = _refuse_command(session, e)
+    finally:
+        session.set_state("idle")
+        session.emit("turn_end", reason=reason)
+    return reason
+
+
+RULE_COMMANDS = {"rule": run_rule, "fix": run_correction}
+
+
+# --- scheduled jobs -------------------------------------------------------------
+
+DAYS = {"mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6, "sun": 7}
+
+
+def parse_schedule(entries):
+    """The valid jobs of agent.schedule: each {"name", "text"} with either
+    "at" ("HH:MM", local time, and optionally "days": 1..7 or mon..sun) or
+    "every_min". A malformed entry is dropped and named on stderr; it never
+    takes the server down."""
+    jobs = []
+    for n, entry in enumerate(entries if isinstance(entries, list) else []):
+        try:
+            if not isinstance(entry, dict):
+                raise ValueError("항목이 객체가 아니다")
+            job = {"name": str(entry.get("name") or "작업 %d" % (n + 1)),
+                   "text": str(entry.get("text") or "").strip()}
+            if not job["text"]:
+                raise ValueError("text가 비어 있다")
+            if entry.get("every_min") is not None:
+                every = float(entry["every_min"])
+                if not 1 <= every <= 1440:
+                    raise ValueError("every_min은 1~1440이다")
+                job["every"] = every * 60
+            else:
+                m = re.match(r"^(\d{1,2}):(\d{2})$", str(entry.get("at") or "").strip())
+                if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+                    raise ValueError("at은 HH:MM이다")
+                job["at"] = (int(m.group(1)), int(m.group(2)))
+            if entry.get("days") is not None:
+                given = entry["days"] if isinstance(entry["days"], list) else [entry["days"]]
+                days = set()
+                for d in given:
+                    word = str(d).strip().lower()
+                    days.add(DAYS.get(word[:3]) or (int(word) if word.isdigit() else 0))
+                if not days or min(days) < 1 or max(days) > 7:
+                    raise ValueError("days는 1~7 또는 mon~sun이다")
+                job["days"] = sorted(days)
+            jobs.append(job)
+        except (ValueError, TypeError) as e:
+            sys.stderr.write("agent: schedule entry %d skipped (%s)\n" % (n + 1, e))
+    return jobs
+
+
+def job_text(job):
+    return "예약된 작업「%s」을 실행한다: %s" % (job["name"], job["text"])
+
+
+def fire(session, job):
+    """Start a scheduled job in the session, as if the phone had asked for it,
+    so an approval it needs waits for the phone like any other. False when a
+    turn runs or the day's budget is spent (the session says which, as a notice)."""
+    with session.lock:
+        if session.state != "idle":
+            session.emit("notice", text="예약된 작업「%s」: 진행 중인 요청이 있어 이번은 건너뛰었다" % job["name"])
+            return False
+        limit, used = budget_left(_agent_cfg())
+        if limit and used >= limit:
+            session.emit("notice", text="예약된 작업「%s」: 오늘의 토큰 예산을 다 써서 건너뛰었다" % job["name"])
+            return False
+        session.emit("user", text=job_text(job))  # the phone did not type it: it has to be told
+        session._launch(run_turn, job_text(job))
+    return True
+
+
+_scheduler, _SCHEDULER_LOCK = None, threading.Lock()
+
+
+def start_scheduler():
+    """One daemon thread for agent.schedule. It reads the config again on
+    every wake, so the file can change without a restart."""
+    global _scheduler
+    with _SCHEDULER_LOCK:
+        if _scheduler is None or not _scheduler.is_alive():
+            _scheduler = threading.Thread(target=scheduler_loop, name="agent-scheduler", daemon=True)
+            _scheduler.start()
+    return _scheduler
+
+
+def scheduler_loop(session=None, wake=time.sleep, now=time.time):
+    """Every 15 seconds: start each job whose minute has come. A job with
+    "at" runs once in its minute (on its days); one with "every_min" runs when
+    that long has passed since it last ran, the first time at once."""
+    session, ran, last = session or get_session(), {}, {}
+    while True:
+        wake(15)
+        try:
+            jobs = parse_schedule(_agent_cfg().get("schedule"))
+        except Exception:  # the config cannot be read just now: the next wake tries again
+            continue
+        t, stamp = now(), time.strftime("%Y-%m-%d %H:%M", time.localtime(now()))
+        local = time.localtime(t)
+        for job in jobs:
+            if "at" in job:
+                due = (local.tm_hour, local.tm_min) == job["at"] and (
+                    "days" not in job or local.tm_wday + 1 in job["days"])
+                seen = stamp
+            else:
+                due, seen = t - ran.get(job["name"], 0) >= job["every"], t
+            if not due or last.get(job["name"]) == seen:
+                continue
+            last[job["name"]] = seen
+            if fire(session, job):
+                ran[job["name"]] = t
+            else:
+                ran.pop(job["name"], None)  # not started: it is due again on the next wake
+
+
+# --- command line ----------------------------------------------------------------
+
+def main(argv=None):
+    """python3 agent.py --once "<요청>" | --rule "<규칙>" | --rules | --schedule"""
+    import argparse
+    parser = argparse.ArgumentParser(prog="agent.py", description="swiv 에이전트: 점검과 예약에 쓰는 명령행")
+    what = parser.add_mutually_exclusive_group(required=True)
+    what.add_argument("--once", metavar="TEXT", help="요청 하나를 폰 없이 돈다(승인이 필요한 일은 하지 않는다)")
+    what.add_argument("--rule", metavar="TEXT", help="규칙을 agent.rules_path에 추가한다")
+    what.add_argument("--rules", action="store_true", help="저장된 규칙을 보인다")
+    what.add_argument("--schedule", action="store_true", help="설정의 예약 작업을 검사하고 보인다")
+    args = parser.parse_args(argv)
+    if args.rules:
+        for r in load_rules(_agent_cfg()):
+            print("%s (%s)\n%s\n" % (r.get("title") or "(제목 없는 규칙)", r.get("date") or "날짜 없음", r.get("body")))
+        return 0
+    if args.rule:
+        print(add_rule(_agent_cfg(), args.rule, "명령행에서 정함"))
+        return 0
+    if args.schedule:
+        for job in parse_schedule(_agent_cfg().get("schedule")):
+            print("%s  %s  %s" % (job["name"], ("%02d:%02d" % job["at"]) if "at" in job
+                                  else "every %d min" % (job["every"] // 60), job["text"]))
+        return 0
+    cfg = _agent_cfg()
+    cfg["approval_timeout_sec"] = 0  # nobody is there to approve: what needs it is not done
+    session = AgentSession()
+    reason = run_turn(session, args.once)
+    for e in session.events:
+        if e["type"] == "assistant":
+            print("\n" + e["text"])
+        elif e["type"] == "tool_result":
+            print("[%s] %s → %s" % (e["status"], e["name"], str(e["result"])[:500]))
+        elif e["type"] == "error":
+            print("오류: " + e["message"])
+    return 0 if reason == "done" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
